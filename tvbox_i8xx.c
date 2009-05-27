@@ -233,7 +233,7 @@ static int get_855_stolen_memory_info(struct pci_bus *bus) {
 
 	DBG_("Intel 855 HHIB CFG word 0x52: 0x%04X",w);
 
-	switch ((w >> 4) & 3) {
+	switch ((w >> 4) & 7) {
 		case 1:	intel_stolen_size = MB(1);	break;
 		case 2:	intel_stolen_size = MB(4);	break;
 		case 3: intel_stolen_size = MB(8);	break;
