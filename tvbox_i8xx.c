@@ -104,6 +104,15 @@ static int alloc_pgtable(void) {
 	DBG_("pagetable: Physical memory location 0x%08X",pgtable_base_phys);
 	pgtable = (uint32_t*)pgtable_base;
 
+	/* make sure it's "size aligned", intel h/w demands it.
+	 * fortunately, the Linux kernel seems to also return page orders that are size aligned */
+	{
+		unsigned long sz = 1UL << (PAGE_SHIFT + pgtable_order);
+		if ((pgtable_base & (sz - 1)) != 0)
+			DBG_("pagetable: Linux gave us non-size-aligned memory! 0x%08lX & 0x%08lX == 0x%08lX",
+				pgtable_base,sz-1,pgtable_base&sz);
+	}
+
 	/* finally, the region needs to be uncacheable so that our updates (or userspace's) take effect immediately */
 	if (set_memory_uc(pgtable_base,pages))
 		DBG("Warning, unable to make pages uncacheable");
@@ -132,11 +141,41 @@ static size_t		aperature_size = 0;
 static size_t		aperature_base = 0;	/* first aperature only */
 static int		chipset = 0;
 
+/* only the first device's MMIO */
+static size_t			mmio_base = 0;
+static size_t			mmio_size = 0;
+static volatile uint32_t*	mmio = NULL;
+
+#define MMIO(x)			( *( mmio + ((x) >> 2) ) )
+
 enum {
 	/* sorry these are all the test subjects I have */
 	CHIP_855,	/* 855GM chipsets */
 	CHIP_965	/* 965 chipset */
 };
+
+static int map_mmio(void) {
+	if (mmio_base == 0 || mmio_size == 0)
+		return -ENODEV;
+
+	if (mmio != NULL) /* no leaking! */
+		return 0;
+
+	mmio = (volatile uint32_t*)ioremap(mmio_base,mmio_size);
+	if (mmio == NULL)
+		return -ENODEV;
+
+	DBG_("mmap mmio: 0x%08lX phys 0x%08lX",(unsigned long)mmio,(unsigned long)mmio_base);
+	return 0;
+}
+
+static void unmap_mmio(void) {
+	if (mmio != NULL) {
+		DBG_("unmap mmio: 0x%08X",(size_t)mmio);
+		iounmap((void*)mmio);
+		mmio = NULL;
+	}
+}
 
 static size_t find_intel_aperature(struct pci_dev *dev,size_t *c_base) {
 	size_t base=0,size=0;
@@ -147,6 +186,27 @@ static size_t find_intel_aperature(struct pci_dev *dev,size_t *c_base) {
 
 		/* the aperature/framebuffer is the large one that is marked "prefetchable" */
 		if ((res->flags & IORESOURCE_MEM) && (res->flags & IORESOURCE_PREFETCH) &&
+			!(res->flags & IORESOURCE_DISABLED) && res->start != 0 && base == 0) {
+			base = res->start;
+			size = (res->end - res->start) + 1;
+		}
+	}
+
+	if (c_base != NULL)
+		*c_base = base;
+
+	return size;
+}
+
+static size_t find_intel_mmio(struct pci_dev *dev,size_t *c_base) {
+	size_t base=0,size=0;
+	int bar;
+
+	for (bar=0;bar < PCI_ROM_RESOURCE;bar++) {
+		struct resource *res = &dev->resource[bar];
+
+		/* the aperature/framebuffer is the small one that is marked "non-prefetchable" */
+		if ((res->flags & IORESOURCE_MEM) && !(res->flags & IORESOURCE_PREFETCH) &&
 			!(res->flags & IORESOURCE_DISABLED) && res->start != 0 && base == 0) {
 			base = res->start;
 			size = (res->end - res->start) + 1;
@@ -233,6 +293,11 @@ static int get_855_info(struct pci_bus *bus,int slot) {
 		}
 	}
 
+	/* primary device: get MMIO */
+	mmio_size = find_intel_mmio(primary,&mmio_base);
+	if (mmio_base != 0 && mmio_size != 0)
+		DBG_("First MMIO @ 0x%08X size %08X",mmio_base,mmio_size);
+
 	if (aperature_size > 0)
 		DBG_("Total aperature size: 0x%08X %uMB",aperature_size,aperature_size >> 20UL);
 
@@ -284,6 +349,40 @@ static int find_intel_graphics(void) {
 	}
 
 	return ret;
+}
+
+/* write page table register to change mapping */
+static void intel_switch_pgtable(unsigned long addr) {
+	MMIO(0x2020) = (addr & (~0xFFF)) | 1;
+}
+
+/* generate a safe pagetable that restores framebuffer sanity.
+ * overwrites the contents of pgtable to do it. */
+static void pgtable_make_default() {
+	unsigned int page=0,addr=0;
+	unsigned int def_sz = intel_stolen_size - pgtable_size;
+
+	DBG_("making default pgtable. pgtable sz=%u",def_sz);
+
+	while (addr < aperature_size && page < pgtable_entries && addr < def_sz)
+		pgtable[page++] = ((intel_stolen_base + addr) & ~0xFFFUL) | 1;
+
+	/* map out page table itself by repeating last entry */
+	while (addr < aperature_size && page < pgtable_entries) {
+		pgtable[page] = pgtable[page-1];
+		page++;
+	}
+
+	/* fill rest with zero */
+	while (page < pgtable_entries)
+		pgtable[page++] = 0;
+}
+
+/* generate safe pagetable, and point the Intel chipset at it.
+ * after this call, the active framebuffer is our buffer. be careful! */
+static void pgtable_default_our_buffer() {
+	pgtable_make_default();
+	intel_switch_pgtable(pgtable_base_phys);
 }
 
 /* chardev file operations */
@@ -339,12 +438,23 @@ static int __init tvbox_i8xx_init(void) {
 		return -ENOMEM;
 	}
 
+	DBG("Mapping MMIO");
+	if (map_mmio()) {
+		free_pgtable();
+		DBG("cannot mmap");
+		return -ENOMEM;
+	}
+
 	DBG_("Registering char dev misc, minor %d",TVBOX_I8XX_MINOR);
 	if (misc_register(&tvbox_i8xx_dev)) {
+		unmap_mmio();
 		free_pgtable();
 		DBG("Misc register failed!");
 		return -ENODEV;
 	}
+
+	DBG("Redirecting screen to my local pagetable, away from VESA BIOS");
+	pgtable_make_default();
 
 	return 0; /* OK */
 }
@@ -354,6 +464,8 @@ static void __exit tvbox_i8xx_cleanup(void) {
 	misc_deregister(&tvbox_i8xx_dev);
 	DBG("Freeing pagetable");
 	free_pgtable();
+	DBG("Unmapping MMIO");
+	unmap_mmio();
 	DBG("Goodbye");
 }
 
