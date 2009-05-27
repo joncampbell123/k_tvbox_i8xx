@@ -452,7 +452,7 @@ static void pgtable_vesa_bios_default(void) {
 	}
 
 	/* now switch pagetable to THAT */
-	intel_switch_pgtable(pgtable_base_phys + vesa_bios_pgtable_offset);
+	intel_switch_pgtable(aperature_base + vesa_bios_pgtable_offset);
 
 	/* at this point the contents of our table no longer matter.
 	 * that is good---it's a safe default to fall back on so that
