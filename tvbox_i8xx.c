@@ -47,6 +47,8 @@
 # define DBG(x) { }
 #endif
 
+static unsigned long MB(unsigned long x) { return x << 20UL; }
+
 /* on behalf of the user-space application we grab a 512KB region and hold onto it.
  * Intel's page table design allows the framebuffer and AGP aperature to literally happen anywhere
  * in system RAM even if far-flung across fragmented pages, BUT the page table itself must exist
@@ -100,6 +102,7 @@ static int alloc_pgtable() {
 	DBG_("pagetable: Allocated at 0x%08lX size 0x%08lX",(unsigned long)pgtable_base,(unsigned long)pgtable_size);
 	pgtable_base_phys = virt_to_phys((void*)pgtable_base);
 	DBG_("pagetable: Physical memory location 0x%08X",pgtable_base_phys);
+	pgtable = (uint32_t*)pgtable_base;
 
 	return 0;
 }
@@ -152,6 +155,55 @@ static size_t find_intel_aperature(struct pci_dev *dev,size_t *c_base) {
 	return size;
 }
 
+static int get_855_stolen_memory_info(struct pci_bus *bus) {
+	uint16_t w;
+
+	intel_stolen_base = 0;
+	intel_stolen_size = 0;
+
+	/* Host Hub Interface Bridge dev 0 */
+	if (pci_bus_read_config_word(bus,PCI_DEVFN(0,0),0x52,&w)) {
+		DBG_("Whoah! Cannot read PCI configuration space word @ 0x%X",0x52);
+		return -ENODEV;
+	}
+
+	DBG_("Intel 855 HHIB CFG word 0x52: 0x%04X",w);
+
+	switch ((w >> 4) & 3) {
+		case 1:	intel_stolen_size = MB(1);	break;
+		case 2:	intel_stolen_size = MB(4);	break;
+		case 3: intel_stolen_size = MB(8);	break;
+		case 4:	intel_stolen_size = MB(16);	break;
+		case 5:	intel_stolen_size = MB(32);	break;
+	}
+
+	/* take "total ram" estimate from Linux, round up to likely 32MB multiple,
+	 * subtract 1MB for the SMM area, and subtract for the stolen base, and...
+	 * that's where it starts */
+	{
+		struct sysinfo s;
+		si_meminfo(&s);
+		intel_stolen_base = s.totalram * s.mem_unit;
+		DBG_("sysinfo: total ram pages %lu mem unit %lu",(unsigned long)s.totalram,(unsigned long)s.mem_unit);
+
+		/* Linux get's it's total memory report from the BIOS, who of course
+		 * returns total ram - 1MB - stolen RAM. so we have to round back up
+		 * to what is most likely. Intel docs imply the chipset can only handle
+		 * amounts of RAM up to the nearest 32MB or 64MB multiple */
+		intel_stolen_base +=   MB(32) - 1;
+		intel_stolen_base &= ~(MB(32) - 1);
+
+		intel_stolen_base -= MB(1);	/* System Management Mode area */
+		intel_stolen_base -= intel_stolen_size;
+	}
+
+	DBG_("Stolen memory: %uMB @ 0x%08X",intel_stolen_size >> 20U,intel_stolen_base);
+	if (intel_stolen_size == 0 || intel_stolen_base == 0)
+		return -ENODEV;
+
+	return 0;
+}
+
 static int get_855_info(struct pci_bus *bus,int slot) {
 	struct pci_dev *primary = pci_get_slot(bus,PCI_DEVFN(slot,0));		/* primary function */
 	struct pci_dev *secondary = pci_get_slot(bus,PCI_DEVFN(slot,1));	/* for those with secondary function for second head */
@@ -177,6 +229,9 @@ static int get_855_info(struct pci_bus *bus,int slot) {
 
 	if (aperature_size > 0)
 		DBG_("Total aperature size: 0x%08X %uMB",aperature_size,aperature_size >> 20UL);
+
+	if (get_855_stolen_memory_info(bus))
+		return -ENODEV;
 
 	return (aperature_base != 0 && aperature_size != 0) ? 0 : -ENODEV;
 }
