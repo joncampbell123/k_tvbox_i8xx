@@ -358,7 +358,9 @@ static void intel_switch_pgtable(unsigned long addr) {
 }
 
 /* generate a safe pagetable that restores framebuffer sanity.
- * overwrites the contents of pgtable to do it. */
+ * overwrites the contents of pgtable to do it.
+ * the result lies in system RAM in a buffer we allocated,
+ * but mimicks the layout used by Intel's VGA BIOS (see above for comments) */
 static void pgtable_make_default(void) {
 	unsigned int page=0,addr=0;
 	unsigned int def_sz = intel_stolen_size - pgtable_size;
@@ -382,10 +384,36 @@ static void pgtable_make_default(void) {
 		pgtable[page++] = 0;
 }
 
+/* like pgtable_make_default() but purposely maps in the page table itself
+ * and the system management mode area, so we can "pierce the veil" that
+ * Intel's chipsets put in place to normally hide these areas (writes to the
+ * "stolen" area and reads from it are terminated by the bridge) */
+static void pgtable_pierce_the_veil(void) {
+	unsigned int page=0,addr=0;
+
+	DBG("making veil-piercing table");
+
+	while (addr < aperature_size && page < pgtable_entries && addr < (intel_total_memory - intel_stolen_base)) {
+		pgtable[page++] = (intel_stolen_base + addr) | 1;
+		addr += PAGE_SIZE;
+	}
+
+	/* fill rest with zero */
+	while (page < pgtable_entries)
+		pgtable[page++] = 0;
+}
+
 /* generate safe pagetable, and point the Intel chipset at it.
  * after this call, the active framebuffer is our buffer. be careful! */
 static void pgtable_default_our_buffer(void) {
 	pgtable_make_default();
+	intel_switch_pgtable(pgtable_base_phys);
+}
+
+/* generate safe pagetable, and point the Intel chipset at it.
+ * after this call, the active framebuffer is our buffer. be careful! */
+static void pgtable_pierce_the_veil_now(void) {
+	pgtable_pierce_the_veil();
 	intel_switch_pgtable(pgtable_base_phys);
 }
 
@@ -459,6 +487,9 @@ static int __init tvbox_i8xx_init(void) {
 
 	DBG("Redirecting screen to my local pagetable, away from VESA BIOS");
 	pgtable_default_our_buffer();
+
+	DBG("Piercing the veil");
+	pgtable_pierce_the_veil_now();
 
 	return 0; /* OK */
 }
