@@ -358,7 +358,7 @@ static void intel_switch_pgtable(unsigned long addr) {
 
 /* generate a safe pagetable that restores framebuffer sanity.
  * overwrites the contents of pgtable to do it. */
-static void pgtable_make_default() {
+static void pgtable_make_default(void) {
 	unsigned int page=0,addr=0;
 	unsigned int def_sz = intel_stolen_size - pgtable_size;
 
@@ -380,7 +380,7 @@ static void pgtable_make_default() {
 
 /* generate safe pagetable, and point the Intel chipset at it.
  * after this call, the active framebuffer is our buffer. be careful! */
-static void pgtable_default_our_buffer() {
+static void pgtable_default_our_buffer(void) {
 	pgtable_make_default();
 	intel_switch_pgtable(pgtable_base_phys);
 }
@@ -454,7 +454,7 @@ static int __init tvbox_i8xx_init(void) {
 	}
 
 	DBG("Redirecting screen to my local pagetable, away from VESA BIOS");
-	pgtable_make_default();
+	pgtable_default_our_buffer();
 
 	return 0; /* OK */
 }
