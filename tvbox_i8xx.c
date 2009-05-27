@@ -59,15 +59,15 @@ static unsigned long MB(unsigned long x) { return x << 20UL; }
  * display controller the userspace daemon might want both to function at the same time, with separate
  * page tables for each. the page table has to be large enough have one DWORD per page of aperature.
  * two aperatures: double the space. */
-static unsigned long	pgtable_base = NULL;
 static uint32_t*	pgtable = NULL;
+static unsigned long	pgtable_base = 0;
 static size_t		pgtable_base_phys = 0;
 static size_t		pgtable_size = 0;
 static unsigned int	pgtable_order = 0;
 /* handy way for programmer reference. pgtable_size is in bytes */
 #define pgtable_entries (pgtable_size / 4)
 
-static void free_pgtable() {
+static void free_pgtable(void) {
 	if (pgtable_base) {
 		DBG("Freeing pagetable");
 		free_pages(pgtable_base,pgtable_order);
@@ -79,7 +79,7 @@ static void free_pgtable() {
 	}
 }
 
-static int alloc_pgtable() {
+static int alloc_pgtable(void) {
 	unsigned int pages = pgtable_size >> PAGE_SHIFT;
 	if (pages == 0) return -ENOMEM;
 
@@ -103,6 +103,10 @@ static int alloc_pgtable() {
 	pgtable_base_phys = virt_to_phys((void*)pgtable_base);
 	DBG_("pagetable: Physical memory location 0x%08X",pgtable_base_phys);
 	pgtable = (uint32_t*)pgtable_base;
+
+	/* finally, the region needs to be uncacheable so that our updates (or userspace's) take effect immediately */
+	if (set_memory_uc(pgtable_base,pages))
+		DBG("Warning, unable to make pages uncacheable");
 
 	return 0;
 }
@@ -190,8 +194,10 @@ static int get_855_stolen_memory_info(struct pci_bus *bus) {
 		 * returns total ram - 1MB - stolen RAM. so we have to round back up
 		 * to what is most likely. Intel docs imply the chipset can only handle
 		 * amounts of RAM up to the nearest 32MB or 64MB multiple */
-		intel_stolen_base +=   MB(32) - 1;
+		intel_stolen_base += MB(16) + intel_stolen_size;
 		intel_stolen_base &= ~(MB(32) - 1);
+
+		intel_total_memory = intel_stolen_base;
 
 		intel_stolen_base -= MB(1);	/* System Management Mode area */
 		intel_stolen_base -= intel_stolen_size;
@@ -236,7 +242,7 @@ static int get_855_info(struct pci_bus *bus,int slot) {
 	return (aperature_base != 0 && aperature_size != 0) ? 0 : -ENODEV;
 }
 
-static int find_intel_graphics() {
+static int find_intel_graphics(void) {
 	int slot,ret = -ENODEV;
 	struct pci_bus *bus = pci_find_bus(0,0);	/* the important ones are always on the first bus e.g. 0:2:0 */
 	if (!bus) {
