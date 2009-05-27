@@ -361,60 +361,102 @@ static void intel_switch_pgtable(unsigned long addr) {
  * overwrites the contents of pgtable to do it.
  * the result lies in system RAM in a buffer we allocated,
  * but mimicks the layout used by Intel's VGA BIOS (see above for comments) */
-static void pgtable_make_default(void) {
+static void pgtable_make_default(volatile uint32_t *pgt) {
 	unsigned int page=0,addr=0;
 	unsigned int def_sz = intel_stolen_size - pgtable_size;
 
 	DBG_("making default pgtable. pgtable sz=%u",def_sz);
 
 	while (addr < aperature_size && page < pgtable_entries && addr < def_sz) {
-		pgtable[page++] = (intel_stolen_base + addr) | 1;
+		pgt[page++] = (intel_stolen_base + addr) | 1;
 		addr += PAGE_SIZE;
 	}
 
 	/* map out page table itself by repeating last entry */
 	while (addr < aperature_size && page < pgtable_entries) {
-		pgtable[page] = pgtable[page-1];
+		pgt[page] = pgtable[page-1];
 		addr += PAGE_SIZE;
 		page++;
 	}
 
 	/* fill rest with zero */
 	while (page < pgtable_entries)
-		pgtable[page++] = 0;
+		pgt[page++] = 0;
 }
 
 /* like pgtable_make_default() but purposely maps in the page table itself
  * and the system management mode area, so we can "pierce the veil" that
  * Intel's chipsets put in place to normally hide these areas (writes to the
- * "stolen" area and reads from it are terminated by the bridge) */
-static void pgtable_pierce_the_veil(void) {
+ * "stolen" area and reads from it are terminated by the bridge).
+ *
+ * this is typically used by the code to open up the stolen area, write in
+ * a replacement table, redirect to that, and then leave the system in a state
+ * as if the Intel VGA BIOS had done it. */
+static void pgtable_make_pierce_the_veil(volatile uint32_t *pgt) {
 	unsigned int page=0,addr=0;
 
 	DBG("making veil-piercing table");
 
+#if 0
+	/* no, don't risk security by exposing SMM memory... */
 	while (addr < aperature_size && page < pgtable_entries && addr < (intel_total_memory - intel_stolen_base)) {
-		pgtable[page++] = (intel_stolen_base + addr) | 1;
+#else
+	while (addr < aperature_size && page < pgtable_entries && addr < intel_stolen_size) {
+#endif
+		pgt[page++] = (intel_stolen_base + addr) | 1;
 		addr += PAGE_SIZE;
 	}
 
 	/* fill rest with zero */
 	while (page < pgtable_entries)
-		pgtable[page++] = 0;
+		pgt[page++] = 0;
 }
 
 /* generate safe pagetable, and point the Intel chipset at it.
  * after this call, the active framebuffer is our buffer. be careful! */
 static void pgtable_default_our_buffer(void) {
-	pgtable_make_default();
+	pgtable_make_default(pgtable);
 	intel_switch_pgtable(pgtable_base_phys);
 }
 
 /* generate safe pagetable, and point the Intel chipset at it.
  * after this call, the active framebuffer is our buffer. be careful! */
-static void pgtable_pierce_the_veil_now(void) {
-	pgtable_pierce_the_veil();
+static void pgtable_pierce_the_veil(void) {
+	pgtable_make_pierce_the_veil(pgtable);
 	intel_switch_pgtable(pgtable_base_phys);
+}
+
+/* pierce the veil to write into stolen memory, put a replacement table there (as if the Intel VGA BIOS has done it)
+ * and then close it back up and walk away. */
+static void pgtable_vesa_bios_default(void) {
+	unsigned long vesa_bios_pgtable_offset = intel_stolen_size - pgtable_size;
+
+	pgtable_pierce_the_veil();
+
+	DBG("veil pierced, writing replacement table up in stolen area");
+
+	/* stolen mem area open, write in a replacement table */
+	{
+		volatile uint32_t *npt;
+		unsigned long pho = aperature_base + vesa_bios_pgtable_offset;
+		DBG_("writing to aperature @ 0x%08lX + 0x%08lX = 0x%08lX",(unsigned long)aperature_base,
+			(unsigned long)vesa_bios_pgtable_offset,pho);
+
+		npt = (volatile uint32_t*)ioremap(pho,pgtable_size);
+		if (npt == NULL) {
+			DBG("Shit! Cannot ioremap that area! Leaving it as-is for safety");
+			return;
+		}
+		pgtable_make_default(npt);
+		iounmap((void*)npt);
+	}
+
+	/* now switch pagetable to THAT */
+	intel_switch_pgtable(pgtable_base_phys + vesa_bios_pgtable_offset);
+
+	/* at this point the contents of our table no longer matter.
+	 * that is good---it's a safe default to fall back on so that
+	 * userspace counterpart has a good springboard to start with. */
 }
 
 /* chardev file operations */
@@ -489,7 +531,10 @@ static int __init tvbox_i8xx_init(void) {
 	pgtable_default_our_buffer();
 
 	DBG("Piercing the veil");
-	pgtable_pierce_the_veil_now();
+	pgtable_pierce_the_veil();
+
+	DBG("Putting back in the VGA BIOS style table");
+	pgtable_vesa_bios_default();
 
 	return 0; /* OK */
 }
