@@ -303,10 +303,15 @@ static int tvbox_i8xx_release(struct inode *inode, struct file *file) {
 	return 0;
 }
 
+static int tvbox_i8xx_mmap(struct file *file,struct vm_area_struct *vma) {
+	return -ENOMEM;
+}
+
 static const struct file_operations tvbox_i8xx_fops = {
 	.owner          = THIS_MODULE,
 	.llseek         = no_llseek,
 	.read           = tvbox_i8xx_read,
+	.mmap		= tvbox_i8xx_mmap,
 	.unlocked_ioctl = tvbox_i8xx_ioctl,
 	.open           = tvbox_i8xx_open,
 	.release        = tvbox_i8xx_release,
