@@ -353,7 +353,8 @@ static int find_intel_graphics(void) {
 
 /* write page table register to change mapping */
 static void intel_switch_pgtable(unsigned long addr) {
-	MMIO(0x2020) = (addr & (~0xFFF)) | 1;
+	DBG_("setting page table control = 0x%08lX",addr);
+	MMIO(0x2020) = addr | 1;
 }
 
 /* generate a safe pagetable that restores framebuffer sanity.
@@ -364,12 +365,15 @@ static void pgtable_make_default(void) {
 
 	DBG_("making default pgtable. pgtable sz=%u",def_sz);
 
-	while (addr < aperature_size && page < pgtable_entries && addr < def_sz)
-		pgtable[page++] = ((intel_stolen_base + addr) & ~0xFFFUL) | 1;
+	while (addr < aperature_size && page < pgtable_entries && addr < def_sz) {
+		pgtable[page++] = (intel_stolen_base + addr) | 1;
+		addr += PAGE_SIZE;
+	}
 
 	/* map out page table itself by repeating last entry */
 	while (addr < aperature_size && page < pgtable_entries) {
 		pgtable[page] = pgtable[page-1];
+		addr += PAGE_SIZE;
 		page++;
 	}
 
