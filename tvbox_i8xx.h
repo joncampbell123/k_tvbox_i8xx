@@ -41,7 +41,12 @@ struct tvbox_i8xx_info {
 } tvbox_i8xx_info;
 
 /* driver ioctls */
-#define TVBOX_I8XX_GINFO	_IOR('I', 0x01, struct tvbox_i8xx_info)
+/* --- get driver info */
+#define TVBOX_I8XX_GINFO			_IOR('I', 0x01, struct tvbox_i8xx_info)
+/* --- instruct driver to overwrite pgtable with default mapping and set page table control to point at that */
+#define TVBOX_I8XX_SET_DEFAULT_PGTABLE		_IO ('I', 0x02)
+/* --- instruct driver to restore Intel VGA BIOS pgtable in stolen RAM. destroys our pgtable in the process */
+#define TVBOX_I8XX_SET_VGA_BIOS_PGTABLE		_IO ('I', 0x03)
 
 #define TVBOX_I8XX_MINOR	248
 

@@ -32,6 +32,7 @@
  *                    update this code to support it properly.
  *
  *       * API to userspace:
+ *           [DONE]
  *           - ability to ask for info (top of memory, stolen
  *             memory, etc.)
  *
@@ -676,14 +677,24 @@ static long tvbox_i8xx_ioctl_ginfo(struct tvbox_i8xx_info __user *u_nfo) {
 
 static long tvbox_i8xx_ioctl(struct file *file, unsigned int cmd, unsigned long arg) {
 	int ret = -EIO;
+	spin_lock(&lock);
 	DBG("ioctl");
 
 	switch (cmd) {
 		case TVBOX_I8XX_GINFO:
 			ret = tvbox_i8xx_ioctl_ginfo((struct tvbox_i8xx_info __user *)arg);
 			break;
+		case TVBOX_I8XX_SET_DEFAULT_PGTABLE:
+			pgtable_default_our_buffer();
+			ret = 0;
+			break;
+		case TVBOX_I8XX_SET_VGA_BIOS_PGTABLE:
+			pgtable_vesa_bios_default();
+			ret = 0;
+			break;
 	}
 
+	spin_unlock(&lock);
 	return ret;
 }
 
