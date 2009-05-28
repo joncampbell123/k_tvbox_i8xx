@@ -154,7 +154,7 @@ static int alloc_pgtable(void) {
 
 	DBG_("pagetable: Allocated at 0x%08lX size 0x%08lX",(unsigned long)pgtable_base,(unsigned long)pgtable_size);
 	pgtable_base_phys = virt_to_phys((void*)pgtable_base);
-	DBG_("pagetable: Physical memory location 0x%08lX",pgtable_base_phys);
+	DBG_("pagetable: Physical memory location 0x%08lX",(unsigned long)pgtable_base_phys);
 	pgtable = (uint32_t*)pgtable_base;
 
 	/* make sure it's "size aligned", intel h/w demands it.
@@ -225,7 +225,7 @@ static int map_mmio(void) {
 
 static void unmap_mmio(void) {
 	if (mmio != NULL) {
-		DBG_("unmap mmio: 0x%08lX",(size_t)mmio);
+		DBG_("unmap mmio: 0x%08lX",(unsigned long)mmio);
 		iounmap((void*)mmio);
 		mmio = NULL;
 	}
@@ -327,7 +327,7 @@ static int get_855_stolen_memory_info(struct pci_bus *bus) {
 		intel_stolen_base -= intel_stolen_size;
 	}
 
-	DBG_("Stolen memory: %uMB @ 0x%08lX",(unsigned int)(intel_stolen_size >> 20U),intel_stolen_base);
+	DBG_("Stolen memory: %uMB @ 0x%08lX",(unsigned int)(intel_stolen_size >> 20U),(unsigned long)intel_stolen_base);
 	if (intel_stolen_size == 0 || intel_stolen_base == 0)
 		return -ENODEV;
 
@@ -359,7 +359,7 @@ static int get_965_stolen_memory_info(struct pci_bus *bus) {
 		uint16_t w=0;
 		pci_bus_read_config_word(bus,PCI_DEVFN(0,0),0xB0,&w);
 		intel_total_memory = (w >> 4) << 20;
-		DBG_("Intel TOLUD = 0x%08lX",intel_total_memory);
+		DBG_("Intel TOLUD = 0x%08lX",(unsigned long)intel_total_memory);
 
 		if (intel_total_memory != 0)
 			intel_stolen_base = intel_total_memory - intel_stolen_size;
@@ -385,7 +385,7 @@ static int get_965_stolen_memory_info(struct pci_bus *bus) {
 		intel_stolen_base -= intel_stolen_size;
 	}
 
-	DBG_("Stolen memory: %uMB @ 0x%08lX",(unsigned int)(intel_stolen_size >> 20U),intel_stolen_base);
+	DBG_("Stolen memory: %uMB @ 0x%08lX",(unsigned int)(intel_stolen_size >> 20U),(unsigned long)intel_stolen_base);
 	if (intel_stolen_size == 0 || intel_stolen_base == 0)
 		return -ENODEV;
 
@@ -402,14 +402,14 @@ static int get_855_info(struct pci_bus *bus,int slot) {
 	/* first, primary device */
 	aperature_size = find_intel_aperature(primary,&aperature_base);
 	if (aperature_size > 0) {
-		DBG_("First aperature: @ 0x%08lX size %08lX",aperature_base,aperature_size);
+		DBG_("First aperature: @ 0x%08lX size %08lX",(unsigned long)aperature_base,(unsigned long)aperature_size);
 
 		if (secondary) {
 			/* secondary? */
 			size_t second_size,second_base;
 			second_size = find_intel_aperature(secondary,&second_base);
 			if (second_size > 0) {
-				DBG_("Second aperature: @ 0x%08lX size %08lX",second_base,second_size);
+				DBG_("Second aperature: @ 0x%08lX size %08lX",(unsigned long)second_base,(unsigned long)second_size);
 				aperature_size += second_size;
 			}
 		}
@@ -418,10 +418,10 @@ static int get_855_info(struct pci_bus *bus,int slot) {
 	/* primary device: get MMIO */
 	mmio_size = find_intel_mmio(primary,&mmio_base);
 	if (mmio_base != 0 && mmio_size != 0)
-		DBG_("First MMIO @ 0x%08lX size %08lX",mmio_base,mmio_size);
+		DBG_("First MMIO @ 0x%08lX size %08lX",(unsigned long)mmio_base,(unsigned long)mmio_size);
 
 	if (aperature_size > 0)
-		DBG_("Total aperature size: 0x%08lX %uMB",aperature_size,(unsigned int)(aperature_size >> 20UL));
+		DBG_("Total aperature size: 0x%08lX %uMB",(unsigned long)aperature_size,(unsigned int)(aperature_size >> 20UL));
 
 	if (get_855_stolen_memory_info(bus))
 		return -ENODEV;
@@ -439,14 +439,14 @@ static int get_965_info(struct pci_bus *bus,int slot) {
 	/* first, primary device */
 	aperature_size = find_intel_aperature(primary,&aperature_base);
 	if (aperature_size > 0) {
-		DBG_("First aperature: @ 0x%08lX size %08lX",aperature_base,aperature_size);
+		DBG_("First aperature: @ 0x%08lX size %08lX",(unsigned long)aperature_base,(unsigned long)aperature_size);
 
 		if (secondary) {
 			/* secondary? */
 			size_t second_size,second_base;
 			second_size = find_intel_aperature(secondary,&second_base);
 			if (second_size > 0) {
-				DBG_("Second aperature: @ 0x%08lX size %08lX",second_base,second_size);
+				DBG_("Second aperature: @ 0x%08lX size %08lX",(unsigned long)second_base,(unsigned long)second_size);
 				aperature_size += second_size;
 			}
 		}
@@ -455,10 +455,10 @@ static int get_965_info(struct pci_bus *bus,int slot) {
 	/* primary device: get MMIO */
 	mmio_size = find_intel_mmio(primary,&mmio_base);
 	if (mmio_base != 0 && mmio_size != 0)
-		DBG_("First MMIO @ 0x%08lX size %08lX",mmio_base,mmio_size);
+		DBG_("First MMIO @ 0x%08lX size %08lX",(unsigned long)mmio_base,(unsigned long)mmio_size);
 
 	if (aperature_size > 0)
-		DBG_("Total aperature size: 0x%08lX %uMB",aperature_size,(unsigned int)(aperature_size >> 20UL));
+		DBG_("Total aperature size: 0x%08lX %uMB",(unsigned long)aperature_size,(unsigned int)(aperature_size >> 20UL));
 
 	if (get_965_stolen_memory_info(bus))
 		return -ENODEV;
