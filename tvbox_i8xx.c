@@ -15,6 +15,58 @@
  * doing weird things like two devices...
  *
  * (C) 2009 Impact Studio Pro.
+ *
+ * TODO: This code works great so far on current test hardware. No
+ *       visible glitching.
+ *
+ *       However, there are some important updates that need to be
+ *       done:
+ *
+ *       * Intel 965: The chipset registers are documented to have
+ *                    extended fields for systems with 3GB or more
+ *                    memory (to support stolen memory from above
+ *                    or below the 4GB mark). This code won't work
+ *                    on such systems, you first need to add code
+ *                    that detects this condition, and fails. When
+ *                    you get hardware with Intel 965 and >= 4GB
+ *                    update this code to support it properly.
+ *
+ *       * API to userspace:
+ *           - ability to ask for info (top of memory, stolen
+ *             memory, etc.)
+ *
+ *           - ioctl to run our "safe reset" code (on command,
+ *             we "pierce the veil" and then write into stolen
+ *             RAM a table mimicking what Intel's VGA BIOS creates
+ *             after a fresh reboot or mode set). Userspace can
+ *             use this as a safe known configuration to start
+ *             from when modifying h/w registers.
+ *
+ *           - ioctl to switch to our allocated table copy
+ *
+ *           - ability to mmap our page table. we must map into
+ *             the process's space pages that allow modification.
+ *             the mapping must be "uncacheable", something userspace
+ *             cannot accomplish on it's own safely. uncacheable
+ *             is a must because today's processors have very deep
+ *             caches and queues that would delay any updates userspace
+ *             is trying to do.
+ *
+ *           - safe read/write to/from the page table as fallback
+ *             (if we can't get mmap to work---it's slow, but it
+ *             works)
+ *
+ *           - you need to add code preventing access to this device
+ *             to anyone except super-user. this is dangerous shit
+ *             in the wrong hands, we can't let an accidental
+ *             "chmod 0777" allow non-root to trash RAM.
+ *
+ *           - API to mass convert process virtual addresses to physical?
+ *             So userspace can pass in a huge array of address and
+ *             corresponding process IDs.
+ *
+ *           - Optional: have a mutex to prevent more than one process
+ *             from opening this device.
  */
 
 #include <linux/miscdevice.h>
@@ -608,6 +660,7 @@ static int tvbox_i8xx_open(struct inode *inode, struct file *file) {
 }
 
 static int tvbox_i8xx_release(struct inode *inode, struct file *file) {
+	DBG_("release");
 	return 0;
 }
 
