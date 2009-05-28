@@ -48,6 +48,7 @@
 #endif
 
 static unsigned long MB(unsigned long x) { return x << 20UL; }
+static unsigned long KB(unsigned long x) { return x << 10UL; }
 
 /* on behalf of the user-space application we grab a 512KB region and hold onto it.
  * Intel's page table design allows the framebuffer and AGP aperature to literally happen anywhere
@@ -284,6 +285,7 @@ static int get_855_stolen_memory_info(struct pci_bus *bus) {
 static int get_965_stolen_memory_info(struct pci_bus *bus) {
 	uint16_t w;
 
+	intel_smm_size = 0;
 	intel_stolen_base = 0;
 	intel_stolen_size = 0;
 
@@ -463,8 +465,26 @@ static int find_intel_graphics(void) {
 
 /* write page table register to change mapping */
 static void intel_switch_pgtable(unsigned long addr) {
-	DBG_("setting page table control = 0x%08lX",addr);
-	MMIO(0x2020) = addr | 1;
+	uint32_t other = 0;
+
+	if (chipset == CHIP_965) {
+		/* 965 also wants the size of the page table */
+		if (pgtable_size >= KB(2048))
+			other = 4 << 1;
+		else if (pgtable_size >= KB(1024+512))
+			other = 5 << 1;
+		else if (pgtable_size >= KB(1024))
+			other = 3 << 1;
+		else if (pgtable_size >= KB(512))
+			other = 0 << 1;
+		else if (pgtable_size >= KB(256))
+			other = 1 << 1;
+		else
+			other = 2 << 1;	/* 128KB */
+	}
+
+	DBG_("setting page table control = 0x%08lX",addr | other | 1);
+	MMIO(0x2020) = addr | other | 1;
 }
 
 /* generate a safe pagetable that restores framebuffer sanity.
