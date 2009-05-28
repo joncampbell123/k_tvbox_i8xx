@@ -544,13 +544,11 @@ static int __init tvbox_i8xx_init(void) {
 	DBG("Redirecting screen to my local pagetable, away from VESA BIOS");
 	pgtable_default_our_buffer();
 
-#if 0
 	DBG("Piercing the veil");
 	pgtable_pierce_the_veil();
 
 	DBG("Putting back in the VGA BIOS style table");
 	pgtable_vesa_bios_default();
-#endif
 
 	return 0; /* OK */
 }
