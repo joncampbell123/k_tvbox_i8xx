@@ -67,6 +67,7 @@
  *             in the wrong hands, we can't let an accidental
  *             "chmod 0777" allow non-root to trash RAM.
  *
+ *           [Nahhhhh...]
  *           - API to mass convert process virtual addresses to physical?
  *             So userspace can pass in a huge array of address and
  *             corresponding process IDs.

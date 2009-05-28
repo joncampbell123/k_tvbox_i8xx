@@ -6,3 +6,11 @@ perform must take effect immediately, the normal deep caching doing for most
 apps is unacceptable. Since userspace can't do this, we need this kernel-level
 part to do it, so the user-space part can worry about the rest.
 
+Device node:   /dev/tvbox_i8xx (char device)
+Purpose:       To handle gory kernel-level details involving the Intel graphics
+               Page Tables, locating them, safely restoring them, and maintaing
+               a local copy in system memory that userspace can modify. If
+               mmap() is used, the driver forces the kernel to make the page
+               non-cacheable to ensure that userspace's updates go through
+               immediately---bad things happen when stale data is used in
+               Intel's style of paging.
