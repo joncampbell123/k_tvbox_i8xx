@@ -17,7 +17,7 @@
  * (C) 2009 Impact Studio Pro.
  *
  * TODO: This code works great so far on current test hardware. No
- *       visible glitching.
+ *       visible glitching. Works equally well on x86-64 kernels.
  *
  *       However, there are some important updates that need to be
  *       done:
