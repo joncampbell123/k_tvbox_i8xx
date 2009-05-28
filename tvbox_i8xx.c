@@ -544,16 +544,15 @@ static int __init tvbox_i8xx_init(void) {
 	DBG("Redirecting screen to my local pagetable, away from VESA BIOS");
 	pgtable_default_our_buffer();
 
-	DBG("Piercing the veil");
-	pgtable_pierce_the_veil();
-
-	DBG("Putting back in the VGA BIOS style table");
-	pgtable_vesa_bios_default();
-
 	return 0; /* OK */
 }
 
 static void __exit tvbox_i8xx_cleanup(void) {
+	if (pgtable != NULL && mmio != NULL) {
+		DBG("Restoring framebuffer and pagetable");
+		pgtable_vesa_bios_default();
+	}
+
 	DBG("Unregistering device");
 	misc_deregister(&tvbox_i8xx_dev);
 	DBG("Freeing pagetable");
