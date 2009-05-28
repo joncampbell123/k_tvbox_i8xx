@@ -135,6 +135,7 @@ static int alloc_pgtable(void) {
 static size_t		intel_total_memory = 0;
 static size_t		intel_stolen_base = 0;
 static size_t		intel_stolen_size = 0;
+static size_t		intel_smm_size = 0;
 
 /* Intel PCI device information. Sum of aperatures if more than one. */
 static size_t		aperature_size = 0;
@@ -241,6 +242,16 @@ static int get_855_stolen_memory_info(struct pci_bus *bus) {
 		case 5:	intel_stolen_size = MB(32);	break;
 	}
 
+	/* try to get stolen base */
+	{
+		uint8_t b;
+		pci_bus_read_config_byte(bus,PCI_DEVFN(0,0),0x61,&b);
+		DBG_("ESMRAMC 0x%02X",b);
+		if (b & 1)	intel_smm_size = MB(1);
+		else		intel_smm_size = 0;
+		DBG_("SMM area: %uMB",intel_smm_size >> 20UL);
+	}
+
 	/* take "total ram" estimate from Linux, round up to likely 32MB multiple,
 	 * subtract 1MB for the SMM area, and subtract for the stolen base, and...
 	 * that's where it starts */
@@ -254,12 +265,12 @@ static int get_855_stolen_memory_info(struct pci_bus *bus) {
 		 * returns total ram - 1MB - stolen RAM. so we have to round back up
 		 * to what is most likely. Intel docs imply the chipset can only handle
 		 * amounts of RAM up to the nearest 32MB or 64MB multiple */
-		intel_stolen_base += MB(16) + intel_stolen_size;
+		intel_stolen_base += MB(32) + intel_stolen_size - 1;
 		intel_stolen_base &= ~(MB(32) - 1);
 
 		intel_total_memory = intel_stolen_base;
 
-		intel_stolen_base -= MB(1);	/* System Management Mode area */
+		intel_stolen_base -= intel_smm_size;	/* System Management Mode area */
 		intel_stolen_base -= intel_stolen_size;
 	}
 
@@ -528,14 +539,18 @@ static int __init tvbox_i8xx_init(void) {
 		return -ENODEV;
 	}
 
+	DBG_("Before init, page table control: 0x%08X",MMIO(0x2020));
+
 	DBG("Redirecting screen to my local pagetable, away from VESA BIOS");
 	pgtable_default_our_buffer();
 
+#if 0
 	DBG("Piercing the veil");
 	pgtable_pierce_the_veil();
 
 	DBG("Putting back in the VGA BIOS style table");
 	pgtable_vesa_bios_default();
+#endif
 
 	return 0; /* OK */
 }
