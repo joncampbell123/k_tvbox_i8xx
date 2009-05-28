@@ -281,6 +281,63 @@ static int get_855_stolen_memory_info(struct pci_bus *bus) {
 	return 0;
 }
 
+static int get_965_stolen_memory_info(struct pci_bus *bus) {
+	uint16_t w;
+
+	intel_stolen_base = 0;
+	intel_stolen_size = 0;
+
+	/* Host Hub Interface Bridge dev 0 */
+	if (pci_bus_read_config_word(bus,PCI_DEVFN(0,0),0x52,&w)) {
+		DBG_("Whoah! Cannot read PCI configuration space word @ 0x%X",0x52);
+		return -ENODEV;
+	}
+
+	DBG_("Intel 965 HHIB CFG word 0x52: 0x%04X",w);
+
+	switch ((w >> 4) & 7) {
+		case 1:	intel_stolen_size = MB(1);	break;
+		case 3: intel_stolen_size = MB(8);	break;
+	}
+
+	/* the 965 has an explicit register for "top of memory", use that */
+	{
+		uint16_t w=0;
+		pci_bus_read_config_word(bus,PCI_DEVFN(0,0),0xB0,&w);
+		intel_total_memory = (w >> 4) << 20;
+		DBG_("Intel TOLUD = 0x%08X",intel_total_memory);
+
+		if (intel_total_memory != 0)
+			intel_stolen_base = intel_total_memory - intel_stolen_size;
+	}
+
+	/* take "total ram" estimate from Linux, round up to likely 32MB multiple,
+	 * subtract 1MB for the SMM area, and subtract for the stolen base, and...
+	 * that's where it starts */
+	if (intel_total_memory == 0) {
+		struct sysinfo s;
+		si_meminfo(&s);
+		DBG("TOLUD register worthless, estimating");
+		intel_stolen_base = s.totalram * s.mem_unit;
+		DBG_("sysinfo: total ram pages %lu mem unit %lu",(unsigned long)s.totalram,(unsigned long)s.mem_unit);
+
+		/* Linux get's it's total memory report from the BIOS, who of course
+		 * returns total ram - 1MB - stolen RAM. so we have to round back up
+		 * to what is most likely. Intel docs imply the chipset can only handle
+		 * amounts of RAM up to the nearest 32MB or 64MB multiple */
+		intel_stolen_base += MB(64) + intel_stolen_size - 1;
+		intel_stolen_base &= ~(MB(64) - 1);
+		intel_total_memory = intel_stolen_base;
+		intel_stolen_base -= intel_stolen_size;
+	}
+
+	DBG_("Stolen memory: %uMB @ 0x%08X",intel_stolen_size >> 20U,intel_stolen_base);
+	if (intel_stolen_size == 0 || intel_stolen_base == 0)
+		return -ENODEV;
+
+	return 0;
+}
+
 static int get_855_info(struct pci_bus *bus,int slot) {
 	struct pci_dev *primary = pci_get_slot(bus,PCI_DEVFN(slot,0));		/* primary function */
 	struct pci_dev *secondary = pci_get_slot(bus,PCI_DEVFN(slot,1));	/* for those with secondary function for second head */
@@ -318,6 +375,43 @@ static int get_855_info(struct pci_bus *bus,int slot) {
 	return (aperature_base != 0 && aperature_size != 0) ? 0 : -ENODEV;
 }
 
+static int get_965_info(struct pci_bus *bus,int slot) {
+	struct pci_dev *primary = pci_get_slot(bus,PCI_DEVFN(slot,0));		/* primary function */
+	struct pci_dev *secondary = pci_get_slot(bus,PCI_DEVFN(slot,1));	/* for those with secondary function for second head */
+
+	if (primary == NULL)
+		return -ENODEV;
+
+	/* first, primary device */
+	aperature_size = find_intel_aperature(primary,&aperature_base);
+	if (aperature_size > 0) {
+		DBG_("First aperature: @ 0x%08X size %08X",aperature_base,aperature_size);
+
+		if (secondary) {
+			/* secondary? */
+			size_t second_size,second_base;
+			second_size = find_intel_aperature(secondary,&second_base);
+			if (second_size > 0) {
+				DBG_("Second aperature: @ 0x%08X size %08X",second_base,second_size);
+				aperature_size += second_size;
+			}
+		}
+	}
+
+	/* primary device: get MMIO */
+	mmio_size = find_intel_mmio(primary,&mmio_base);
+	if (mmio_base != 0 && mmio_size != 0)
+		DBG_("First MMIO @ 0x%08X size %08X",mmio_base,mmio_size);
+
+	if (aperature_size > 0)
+		DBG_("Total aperature size: 0x%08X %uMB",aperature_size,aperature_size >> 20UL);
+
+	if (get_965_stolen_memory_info(bus))
+		return -ENODEV;
+
+	return (aperature_base != 0 && aperature_size != 0) ? 0 : -ENODEV;
+}
+
 static int find_intel_graphics(void) {
 	int slot,ret = -ENODEV;
 	struct pci_bus *bus = pci_find_bus(0,0);	/* the important ones are always on the first bus e.g. 0:2:0 */
@@ -344,6 +438,11 @@ static int find_intel_graphics(void) {
 		}
 
 		switch (dev->device) {
+			case 0x2A02:
+				chipset = CHIP_965;
+				DBG_("  PCI slot %d, found 965 chipset",slot);
+				ret = get_965_info(bus,slot);
+				break;
 			case 0x3582:
 				chipset = CHIP_855;
 				DBG_("  PCI slot %d, found 855 chipset",slot);
