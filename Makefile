@@ -2,10 +2,15 @@ obj-m += tvbox_i8xx.o
 
 ifndef $(KDIR)
 KDIR=/usr/src/linux-2.6.28.8
-#KDIR=/mnt/sdb1/ext2/usr/src/2.6.28.10
+KDIR=/mnt/sda1/ext2/usr/src/2.6.28.10
 endif
 
-all:
+all: tvbox_i8xx.ko test_info
+
+test_info: test_info.c
+	gcc -std=c99 -pedantic -Wall -o $@ $+
+
+tvbox_i8xx.ko:
 	make -C $(KDIR) M=$(PWD) modules
 
 install:
@@ -13,7 +18,7 @@ install:
 
 clean:
 	make -C $(KDIR) M=$(PWD) clean
-	rm -f modules.order
+	rm -f modules.order test_info
 
 load:
 	rmmod tvbox_i8xx || true
@@ -24,5 +29,5 @@ unload:
 
 dev:
 	rm -f /dev/tvbox_i8xx
-	mknod /dev/tvbox_i8xx c 10 240
+	mknod /dev/tvbox_i8xx c 10 248
 

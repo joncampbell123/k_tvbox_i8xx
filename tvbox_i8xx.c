@@ -23,7 +23,7 @@
  *       done:
  *
  *       * Intel 965: The chipset registers are documented to have
- *                    extended fields for systems with 3GB or more
+ *                    extended fields for systems with 4GB or more
  *                    memory (to support stolen memory from above
  *                    or below the 4GB mark). This code won't work
  *                    on such systems, you first need to add code
@@ -101,6 +101,10 @@
 
 static unsigned long MB(unsigned long x) { return x << 20UL; }
 static unsigned long KB(unsigned long x) { return x << 10UL; }
+
+/* this is a one-process-at-a-time driver, no concurrent issues that way */
+static unsigned int	is_open = 0;
+static spinlock_t	lock = SPIN_LOCK_UNLOCKED;
 
 /* on behalf of the user-space application we grab a 512KB region and hold onto it.
  * Intel's page table design allows the framebuffer and AGP aperature to literally happen anywhere
@@ -190,7 +194,7 @@ static size_t		intel_stolen_base = 0;
 static size_t		intel_stolen_size = 0;
 static size_t		intel_smm_size = 0;
 
-/* Intel PCI device information. Sum of aperatures if more than one. */
+/* Intel PCI device information */
 static size_t		aperature_size = 0;
 static size_t		aperature_base = 0;	/* first aperature only */
 static int		chipset = 0;
@@ -201,12 +205,6 @@ static size_t			mmio_size = 0;
 static volatile uint32_t*	mmio = NULL;
 
 #define MMIO(x)			( *( mmio + ((x) >> 2) ) )
-
-enum {
-	/* sorry these are all the test subjects I have */
-	CHIP_855,	/* 855GM chipsets */
-	CHIP_965	/* 965 chipset */
-};
 
 static int map_mmio(void) {
 	if (mmio_base == 0 || mmio_size == 0)
@@ -394,7 +392,9 @@ static int get_965_stolen_memory_info(struct pci_bus *bus) {
 
 static int get_855_info(struct pci_bus *bus,int slot) {
 	struct pci_dev *primary = pci_get_slot(bus,PCI_DEVFN(slot,0));		/* primary function */
+#ifdef USE_SECONDARY
 	struct pci_dev *secondary = pci_get_slot(bus,PCI_DEVFN(slot,1));	/* for those with secondary function for second head */
+#endif
 
 	if (primary == NULL)
 		return -ENODEV;
@@ -404,6 +404,7 @@ static int get_855_info(struct pci_bus *bus,int slot) {
 	if (aperature_size > 0) {
 		DBG_("First aperature: @ 0x%08lX size %08lX",(unsigned long)aperature_base,(unsigned long)aperature_size);
 
+#ifdef USE_SECONDARY
 		if (secondary) {
 			/* secondary? */
 			size_t second_size,second_base;
@@ -413,6 +414,7 @@ static int get_855_info(struct pci_bus *bus,int slot) {
 				aperature_size += second_size;
 			}
 		}
+#endif
 	}
 
 	/* primary device: get MMIO */
@@ -431,7 +433,9 @@ static int get_855_info(struct pci_bus *bus,int slot) {
 
 static int get_965_info(struct pci_bus *bus,int slot) {
 	struct pci_dev *primary = pci_get_slot(bus,PCI_DEVFN(slot,0));		/* primary function */
+#ifdef USE_SECONDARY
 	struct pci_dev *secondary = pci_get_slot(bus,PCI_DEVFN(slot,1));	/* for those with secondary function for second head */
+#endif
 
 	if (primary == NULL)
 		return -ENODEV;
@@ -441,6 +445,7 @@ static int get_965_info(struct pci_bus *bus,int slot) {
 	if (aperature_size > 0) {
 		DBG_("First aperature: @ 0x%08lX size %08lX",(unsigned long)aperature_base,(unsigned long)aperature_size);
 
+#ifdef USE_SECONDARY
 		if (secondary) {
 			/* secondary? */
 			size_t second_size,second_base;
@@ -450,6 +455,7 @@ static int get_965_info(struct pci_bus *bus,int slot) {
 				aperature_size += second_size;
 			}
 		}
+#endif
 	}
 
 	/* primary device: get MMIO */
@@ -653,18 +659,50 @@ static ssize_t tvbox_i8xx_read(struct file *file, char __user *buf, size_t count
 	return -EIO;
 }
 
+static long tvbox_i8xx_ioctl_ginfo(struct tvbox_i8xx_info __user *u_nfo) {
+	struct tvbox_i8xx_info i;
+	i.total_memory		= intel_total_memory;
+	i.stolen_base		= intel_stolen_base;
+	i.stolen_size		= intel_stolen_size;
+	i.aperature_base	= aperature_base;
+	i.aperature_size	= aperature_size;
+	i.mmio_base		= mmio_base;
+	i.mmio_size		= mmio_size;
+	i.chipset		= chipset;
+	i.pgtable_base		= pgtable_base_phys;
+	i.pgtable_size		= pgtable_size;
+	return copy_to_user(u_nfo,&i,sizeof(i));
+}
+
 static long tvbox_i8xx_ioctl(struct file *file, unsigned int cmd, unsigned long arg) {
+	int ret = -EIO;
 	DBG("ioctl");
-	return -EIO;
+
+	switch (cmd) {
+		case TVBOX_I8XX_GINFO:
+			ret = tvbox_i8xx_ioctl_ginfo((struct tvbox_i8xx_info __user *)arg);
+			break;
+	}
+
+	return ret;
 }
 
 static int tvbox_i8xx_open(struct inode *inode, struct file *file) {
-	DBG("open");
-	return -EBUSY;
+	spin_lock(&lock);
+	if (is_open) {
+		spin_unlock(&lock);
+		return -EBUSY;
+	}
+
+	is_open++;
+	spin_unlock(&lock);
+	return 0;
 }
 
 static int tvbox_i8xx_release(struct inode *inode, struct file *file) {
-	DBG("release");
+	spin_lock(&lock);
+	is_open--;
+	spin_unlock(&lock);
 	return 0;
 }
 
