@@ -648,23 +648,27 @@ static void pgtable_vesa_bios_default(void) {
 
 /* chardev file operations */
 static ssize_t tvbox_i8xx_read(struct file *file, char __user *buf, size_t count, loff_t *ppos) {
+	DBG("read");
 	return -EIO;
 }
 
 static long tvbox_i8xx_ioctl(struct file *file, unsigned int cmd, unsigned long arg) {
+	DBG("ioctl");
 	return -EIO;
 }
 
 static int tvbox_i8xx_open(struct inode *inode, struct file *file) {
+	DBG("open");
 	return -EBUSY;
 }
 
 static int tvbox_i8xx_release(struct inode *inode, struct file *file) {
-	DBG_("release");
+	DBG("release");
 	return 0;
 }
 
 static int tvbox_i8xx_mmap(struct file *file,struct vm_area_struct *vma) {
+	DBG("mmap");
 	return -ENOMEM;
 }
 
