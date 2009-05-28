@@ -47,6 +47,7 @@
  *           [DONE]
  *           - ioctl to switch to our allocated table copy
  *
+ *           [DONE]
  *           - ability to mmap our page table. we must map into
  *             the process's space pages that allow modification.
  *             the mapping must be "uncacheable", something userspace
@@ -789,25 +790,11 @@ static int tvbox_i8xx_release(struct inode *inode, struct file *file) {
 	return 0;
 }
 
-#if 0
-static void tvbox_i8xx_mmap_open(struct vm_area_struct *vma) {
-}
-
-static void tvbox_i8xx_mmap_close(struct vm_area_struct *vma) {
-}
-
-static struct vm_operations_struct tvbox_i8xx_mmap_ops = {
-	.open =                 tvbox_i8xx_mmap_open,
-	.close =                tvbox_i8xx_mmap_close,
-};
-#endif
-
 static int tvbox_i8xx_mmap(struct file *file,struct vm_area_struct *vma) {
 	size_t size = vma->vm_end - vma->vm_start;
 
 	DBG_("mmap vm_start=0x%08X vm_pgoff=0x%08X",(unsigned int)vma->vm_start,(unsigned int)vma->vm_pgoff);
 
-//	vma->vm_ops = &tvbox_i8xx_mmap_ops;
 	vma->vm_flags |= VM_IO;
 	vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
 	if (io_remap_pfn_range(vma, vma->vm_start, (vma->vm_pgoff + pgtable_base_phys) >> PAGE_SHIFT, size, vma->vm_page_prot)) {
