@@ -10,7 +10,7 @@ all: tvbox_i8xx.ko test_info
 test_info: test_info.c
 	gcc -std=c99 -pedantic -Wall -o $@ $+
 
-tvbox_i8xx.ko:
+tvbox_i8xx.ko: tvbox_i8xx.c
 	make -C $(KDIR) M=$(PWD) modules
 
 install:

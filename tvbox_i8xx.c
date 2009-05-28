@@ -36,6 +36,7 @@
  *           - ability to ask for info (top of memory, stolen
  *             memory, etc.)
  *
+ *           [DONE]
  *           - ioctl to run our "safe reset" code (on command,
  *             we "pierce the veil" and then write into stolen
  *             RAM a table mimicking what Intel's VGA BIOS creates
@@ -43,6 +44,7 @@
  *             use this as a safe known configuration to start
  *             from when modifying h/w registers.
  *
+ *           [DONE]
  *           - ioctl to switch to our allocated table copy
  *
  *           - ability to mmap our page table. we must map into
@@ -654,10 +656,70 @@ static void pgtable_vesa_bios_default(void) {
 	 * may it help uvesafb's job too :) */
 }
 
-/* chardev file operations */
+/* alignment is enforced. partial integers are dropped. we make this obvious by the byte count */
+static ssize_t tvbox_i8xx_write(struct file *file, const char __user *buf, size_t count, loff_t *ppos) {
+	loff_t pos = *ppos;
+	ssize_t ret = 0;
+	DBG("write");
+
+	/* sanity check */
+	if (pos & 3)
+		return -EINVAL;
+
+	pos >>= 2ULL;
+	while (count >= sizeof(uint32_t)) {
+		uint32_t word;
+
+		if (pos >= pgtable_entries)
+			break;
+
+		if (get_user(word,(uint32_t *)buf)) {
+			ret = -EFAULT;
+			break;
+		}
+
+		pgtable[pos] = word;
+		count -= sizeof(uint32_t);
+		buf += sizeof(uint32_t);
+		ret += sizeof(uint32_t);
+		pos++;
+	}
+
+	*ppos = pos << 2ULL;
+	return ret;
+}
+
 static ssize_t tvbox_i8xx_read(struct file *file, char __user *buf, size_t count, loff_t *ppos) {
+	loff_t pos = *ppos;
+	ssize_t ret = 0;
 	DBG("read");
-	return -EIO;
+
+	/* sanity check */
+	if (pos & 3)
+		return -EINVAL;
+
+	pos >>= 2ULL;
+	while (count >= sizeof(uint32_t)) {
+		uint32_t word;
+
+		if (pos >= pgtable_entries)
+			break;
+
+		word = pgtable[pos];
+		DBG_("read @ %lu: 0x%08lX",(unsigned long)(pos << 2ULL),(unsigned long)word);
+		if (put_user(word,(uint32_t *)buf)) {
+			ret = -EFAULT;
+			break;
+		}
+
+		count -= sizeof(uint32_t);
+		buf += sizeof(uint32_t);
+		ret += sizeof(uint32_t);
+		pos++;
+	}
+
+	*ppos = pos << 2ULL;
+	return ret;
 }
 
 static long tvbox_i8xx_ioctl_ginfo(struct tvbox_i8xx_info __user *u_nfo) {
@@ -692,6 +754,10 @@ static long tvbox_i8xx_ioctl(struct file *file, unsigned int cmd, unsigned long 
 			pgtable_vesa_bios_default();
 			ret = 0;
 			break;
+		case TVBOX_I8XX_PGTABLE_ACTIVATE:
+			intel_switch_pgtable(pgtable_base_phys);
+			ret = 0;
+			break;
 	}
 
 	spin_unlock(&lock);
@@ -699,6 +765,10 @@ static long tvbox_i8xx_ioctl(struct file *file, unsigned int cmd, unsigned long 
 }
 
 static int tvbox_i8xx_open(struct inode *inode, struct file *file) {
+	/* only God may use this interface */
+	if (!capable(CAP_SYS_ADMIN))
+		return -EPERM;
+
 	spin_lock(&lock);
 	if (is_open) {
 		spin_unlock(&lock);
@@ -722,10 +792,38 @@ static int tvbox_i8xx_mmap(struct file *file,struct vm_area_struct *vma) {
 	return -ENOMEM;
 }
 
+static loff_t tvbox_i8xx_lseek(struct file *file, loff_t offset, int orig)
+{
+	loff_t size = (loff_t)pgtable_size;
+
+	/* keep it simple: enforce alignment */
+	if (offset & 3)
+		return -EINVAL;
+
+	switch (orig) {
+		default:
+			return -EINVAL;
+		case 2:
+			offset += size;
+			break;
+		case 1:
+			offset += file->f_pos;
+		case 0:
+			break;
+	}
+
+	if (offset < 0 || offset > size)
+		return -EINVAL;
+
+	file->f_pos = offset;
+	return file->f_pos;
+}
+
 static const struct file_operations tvbox_i8xx_fops = {
 	.owner          = THIS_MODULE,
-	.llseek         = no_llseek,
+	.llseek         = tvbox_i8xx_lseek,
 	.read           = tvbox_i8xx_read,
+	.write		= tvbox_i8xx_write,
 	.mmap		= tvbox_i8xx_mmap,
 	.unlocked_ioctl = tvbox_i8xx_ioctl,
 	.open           = tvbox_i8xx_open,
