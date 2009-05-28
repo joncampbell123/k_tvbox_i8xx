@@ -55,10 +55,12 @@
  *             caches and queues that would delay any updates userspace
  *             is trying to do.
  *
+ *           [DONE]
  *           - safe read/write to/from the page table as fallback
  *             (if we can't get mmap to work---it's slow, but it
  *             works)
  *
+ *           [DONE]
  *           - you need to add code preventing access to this device
  *             to anyone except super-user. this is dangerous shit
  *             in the wrong hands, we can't let an accidental
@@ -68,6 +70,7 @@
  *             So userspace can pass in a huge array of address and
  *             corresponding process IDs.
  *
+ *           [DONE]
  *           - Optional: have a mutex to prevent more than one process
  *             from opening this device.
  */
@@ -130,6 +133,7 @@ static unsigned int	pgtable_order = 0;
 static void free_pgtable(void) {
 	if (pgtable_base) {
 		DBG("Freeing pagetable");
+		set_memory_wb(pgtable_base,pgtable_size >> PAGE_SHIFT);
 		free_pages(pgtable_base,pgtable_order);
 		pgtable_base = (unsigned long)NULL;
 		pgtable_base_phys = 0;
@@ -660,7 +664,7 @@ static void pgtable_vesa_bios_default(void) {
 static ssize_t tvbox_i8xx_write(struct file *file, const char __user *buf, size_t count, loff_t *ppos) {
 	loff_t pos = *ppos;
 	ssize_t ret = 0;
-	DBG("write");
+/*	DBG("write"); */
 
 	/* sanity check */
 	if (pos & 3)
@@ -678,11 +682,10 @@ static ssize_t tvbox_i8xx_write(struct file *file, const char __user *buf, size_
 			break;
 		}
 
-		pgtable[pos] = word;
+		pgtable[pos++] = word;
 		count -= sizeof(uint32_t);
 		buf += sizeof(uint32_t);
 		ret += sizeof(uint32_t);
-		pos++;
 	}
 
 	*ppos = pos << 2ULL;
@@ -692,7 +695,7 @@ static ssize_t tvbox_i8xx_write(struct file *file, const char __user *buf, size_
 static ssize_t tvbox_i8xx_read(struct file *file, char __user *buf, size_t count, loff_t *ppos) {
 	loff_t pos = *ppos;
 	ssize_t ret = 0;
-	DBG("read");
+/*	DBG("read"); */
 
 	/* sanity check */
 	if (pos & 3)
@@ -705,8 +708,8 @@ static ssize_t tvbox_i8xx_read(struct file *file, char __user *buf, size_t count
 		if (pos >= pgtable_entries)
 			break;
 
-		word = pgtable[pos];
-		DBG_("read @ %lu: 0x%08lX",(unsigned long)(pos << 2ULL),(unsigned long)word);
+		word = pgtable[pos++];
+/*		DBG_("read @ %lu: 0x%08lX",(unsigned long)(pos << 2ULL),(unsigned long)word); */
 		if (put_user(word,(uint32_t *)buf)) {
 			ret = -EFAULT;
 			break;
@@ -715,7 +718,6 @@ static ssize_t tvbox_i8xx_read(struct file *file, char __user *buf, size_t count
 		count -= sizeof(uint32_t);
 		buf += sizeof(uint32_t);
 		ret += sizeof(uint32_t);
-		pos++;
 	}
 
 	*ppos = pos << 2ULL;
@@ -787,9 +789,30 @@ static int tvbox_i8xx_release(struct inode *inode, struct file *file) {
 	return 0;
 }
 
+static void tvbox_i8xx_mmap_open(struct vm_area_struct *vma) {
+}
+
+static void tvbox_i8xx_mmap_close(struct vm_area_struct *vma) {
+}
+
+static struct vm_operations_struct tvbox_i8xx_mmap_ops = {
+	.open =                 tvbox_i8xx_mmap_open,
+	.close =                tvbox_i8xx_mmap_close,
+};
+
 static int tvbox_i8xx_mmap(struct file *file,struct vm_area_struct *vma) {
-	DBG("mmap");
-	return -ENOMEM;
+	size_t size = vma->vm_end - vma->vm_start;
+
+	DBG_("mmap vm_start=0x%08X vm_pgoff=0x%08X",(unsigned int)vma->vm_start,(unsigned int)vma->vm_pgoff);
+
+	vma->vm_ops = &tvbox_i8xx_mmap_ops;
+	if (remap_pfn_range(vma, vma->vm_start, (vma->vm_pgoff + pgtable_base_phys) >> PAGE_SHIFT, size, vma->vm_page_prot)) {
+		DBG("mmap fail");
+		return -EAGAIN;
+	}
+
+	DBG("mmap OK");
+	return 0;
 }
 
 static loff_t tvbox_i8xx_lseek(struct file *file, loff_t offset, int orig)

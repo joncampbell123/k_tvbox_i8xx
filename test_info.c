@@ -1,6 +1,7 @@
 /* test program: get info */
 #include <sys/ioctl.h>
 #include <sys/types.h>
+#include <sys/mman.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
@@ -92,15 +93,16 @@ int main() {
 	if (show_info(fd)) return 2;
 
 	printf("I'm going to test switching to a default sane pgtable\n");
-//	countdown(3);
+//	countdown(2);
 	if (def_pgtable(fd)) return 3;
 
+#if 0
 	printf("I'm going to test switching to VGA BIOS pgtable\n");
-//	countdown(3);
+	countdown(2);
 	if (vgabios_pgtable(fd)) return 3;
 
 	printf("I'm going to make driver's pgtable active again\n");
-//	countdown(3);
+	countdown(2);
 	if (pgtable_activate(fd)) return 3;
 
 	/* test lseek(), make sure aligned one work and unaligned ones fail */
@@ -146,7 +148,7 @@ int main() {
 	}
 	printf("lseek passed\n");
 
-	/* test: read the pagetable using lseek+read */
+	/* test: read the pagetable using lseek+read. purposely try to read beyond the EOF to see if there are bugs there */
 	{
 		int x;
 		uint32_t word=0;
@@ -166,8 +168,171 @@ int main() {
 				return 1;
 			}
 
-			printf("%lu: 0x%08lX\n",(unsigned long)(x>>2),(unsigned long)word);
+			if (word != 0)
+				printf("%lu: 0x%08lX\n",(unsigned long)(x>>2),(unsigned long)word);
 		}
+		
+		/* make sure lseek(end) == end but we can't read */
+		if (lseek(fd,nfo.pgtable_size,SEEK_SET) != nfo.pgtable_size) {
+			fprintf(stderr,"BUG! lseek(end) != end\n");
+			return 1;
+		}
+
+		if (read(fd,&word,sizeof(word)) != 0) {
+			fprintf(stderr,"BUG! I can read at EOF\n");
+			return 1;
+		}
+	}
+
+	/* multiple read test: see if we can pass in an array of uint32_t and get back corresponding pages */
+	{
+		uint32_t words[256];
+		int x,i;
+
+		for (x=0;x < nfo.pgtable_size;x += sizeof(words)) {
+			if (lseek(fd,x,SEEK_SET) != x) {
+				fprintf(stderr,"BUG: lseek(%d) != %d\n",x,x);
+				return 1;
+			}
+
+			int r = read(fd,words,sizeof(words));
+			if (r < 0) {
+				fprintf(stderr,"BUG! read from offset %d failed error %s\n",x,strerror(errno));
+				return 1;
+			}
+			else if (r != sizeof(words) && (x+r) <= nfo.pgtable_size) {
+				fprintf(stderr,"BUG! read from offset %d incomplete\n",x);
+				return 1;
+			}
+
+			for (i=0;i < (r/sizeof(uint32_t));i++) {
+				uint32_t word = words[i];
+				if (word != 0)
+					printf("%lu: 0x%08lX\n",
+						(unsigned long)((x>>2)+i),
+						(unsigned long)word);
+			}
+		}
+	}
+
+	printf("I'm going to repeat the first page table entry across all.\n");
+	printf("Everything should look like vertical streakiness for the time\n");
+	countdown(3);
+
+	/* now write to the table.
+	 * purposely repeat the first entry so the screen has visible vertical streaks */
+	{
+		uint32_t w;
+		unsigned int x;
+
+		lseek(fd,0,SEEK_SET);
+		read(fd,&w,sizeof(w));
+		printf("Repeating 0x%08lX\n",(unsigned long)w);
+
+		for (x=0;x < (nfo.pgtable_size/sizeof(uint32_t));x++) {
+			if (lseek(fd,x*4,SEEK_SET) != (x*4)) {
+				fprintf(stderr,"BUG: lseek(%d) != %d\n",x*4,x*4);
+				return 1;
+			}
+
+			if (write(fd,&w,sizeof(w)) != sizeof(w)) {
+				fprintf(stderr,"Cannot write entry %d\n",x);
+				return 1;
+			}
+		}
+	}
+	sleep(1);
+	{
+		uint32_t w,nw;
+		unsigned int x;
+
+		lseek(fd,0,SEEK_SET);
+		read(fd,&w,sizeof(w));
+		printf("Repeating 0x%08lX\n",(unsigned long)w);
+
+		for (x=0;x < (nfo.pgtable_size/sizeof(uint32_t));x++) {
+			if (lseek(fd,x*4,SEEK_SET) != (x*4)) {
+				fprintf(stderr,"BUG: lseek(%d) != %d\n",x*4,x*4);
+				return 1;
+			}
+
+			nw = w + ((x>>1) * 4096);
+
+			if (write(fd,&nw,sizeof(w)) != sizeof(w)) {
+				fprintf(stderr,"Cannot write entry %d\n",x);
+				return 1;
+			}
+		}
+	}
+	sleep(1);
+	{
+		uint32_t w,nw;
+		unsigned int x;
+
+		lseek(fd,0,SEEK_SET);
+		read(fd,&w,sizeof(w));
+		printf("Repeating 0x%08lX\n",(unsigned long)w);
+
+		for (x=0;x < (nfo.pgtable_size/sizeof(uint32_t));x++) {
+			if (lseek(fd,x*4,SEEK_SET) != (x*4)) {
+				fprintf(stderr,"BUG: lseek(%d) != %d\n",x*4,x*4);
+				return 1;
+			}
+
+			nw = w + ((x&7) * 4096);
+
+			if (write(fd,&nw,sizeof(w)) != sizeof(w)) {
+				fprintf(stderr,"Cannot write entry %d\n",x);
+				return 1;
+			}
+		}
+	}
+	sleep(1);
+
+        if (def_pgtable(fd)) return 3;
+#endif
+
+//	printf("Going to memory-map it now...\n");
+//	countdown(3);
+
+	{
+		int i;
+		volatile uint32_t *x = (volatile uint32_t*)
+			mmap(NULL,nfo.pgtable_size,PROT_READ|PROT_WRITE,MAP_SHARED,fd,0);
+		if (x == (volatile uint32_t*)(-1)) {
+			fprintf(stderr,"mmap failed\n");
+			return 1;
+		}
+
+		printf("Mapped to 0x%08lX (VM)\n",(unsigned long)x);
+		for (i=0;i < nfo.pgtable_size/sizeof(uint32_t);i++) {
+			uint32_t word = x[i];
+			if (word != 0)
+				printf("%lu: 0x%08lX\n",
+					(unsigned long)i,
+					(unsigned long)word);
+		}
+
+		{
+			uint32_t fw = x[0];
+
+			for (i=0;i < nfo.pgtable_size/sizeof(uint32_t);i++)
+				x[i] = fw + ((i&3) * 4096);
+
+			sleep(5);
+
+			for (i=0;i < nfo.pgtable_size/sizeof(uint32_t);i++)
+				x[i] = fw + ((i&7) * 4096);
+
+			sleep(5);
+
+			for (i=0;i < nfo.pgtable_size/sizeof(uint32_t);i++)
+				x[i] = fw + (i * 4096);
+
+			sleep(5);
+		}
+
+		munmap((void*)x,nfo.pgtable_size);
 	}
 
 	close(fd);
