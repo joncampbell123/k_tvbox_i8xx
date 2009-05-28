@@ -93,10 +93,9 @@ int main() {
 	if (show_info(fd)) return 2;
 
 	printf("I'm going to test switching to a default sane pgtable\n");
-//	countdown(2);
+	countdown(2);
 	if (def_pgtable(fd)) return 3;
 
-#if 0
 	printf("I'm going to test switching to VGA BIOS pgtable\n");
 	countdown(2);
 	if (vgabios_pgtable(fd)) return 3;
@@ -290,10 +289,9 @@ int main() {
 	sleep(1);
 
         if (def_pgtable(fd)) return 3;
-#endif
 
-//	printf("Going to memory-map it now...\n");
-//	countdown(3);
+	printf("Going to memory-map it now...\n");
+	countdown(3);
 
 	{
 		int i;
@@ -317,19 +315,22 @@ int main() {
 			uint32_t fw = x[0];
 
 			for (i=0;i < nfo.pgtable_size/sizeof(uint32_t);i++)
+				x[i] = fw + ((i&1) * 4096);
+
+			sleep(1);
+
+			for (i=0;i < nfo.pgtable_size/sizeof(uint32_t);i++)
 				x[i] = fw + ((i&3) * 4096);
 
-			sleep(5);
+			sleep(1);
 
 			for (i=0;i < nfo.pgtable_size/sizeof(uint32_t);i++)
 				x[i] = fw + ((i&7) * 4096);
 
-			sleep(5);
+			sleep(1);
 
 			for (i=0;i < nfo.pgtable_size/sizeof(uint32_t);i++)
 				x[i] = fw + (i * 4096);
-
-			sleep(5);
 		}
 
 		munmap((void*)x,nfo.pgtable_size);
