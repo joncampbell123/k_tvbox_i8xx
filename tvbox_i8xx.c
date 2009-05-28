@@ -468,7 +468,11 @@ static void intel_switch_pgtable(unsigned long addr) {
 	uint32_t other = 0;
 
 	if (chipset == CHIP_965) {
-		/* 965 also wants the size of the page table */
+		/* 965 also wants the size of the page table.
+		 * this is a must especially when pointing to the fake
+		 * recreation of VESA BIOS page table at top of RAM.
+		 * If the chipset thinks our table extends past the top
+		 * it won't use it and the user sees random garbage on their display. */
 		if (pgtable_size >= KB(2048))
 			other = 4 << 1;
 		else if (pgtable_size >= KB(1024+512))
