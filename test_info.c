@@ -50,6 +50,27 @@ static int open_again() {
 	return 0;
 }
 
+static void countdown(int c) {
+	while (c > 0) {
+		printf("%d... ",c--);
+		fflush(stdout);
+		sleep(1);
+	}
+	printf("\n");
+}
+
+static int def_pgtable(int fd) {
+	int r = ioctl(fd,TVBOX_I8XX_SET_DEFAULT_PGTABLE);
+	if (r) fprintf(stderr,"Failed to TVBOX_I8XX_SET_DEFAULT_PGTABLE, %s\n",strerror(errno));
+	return r;
+}
+
+static int vgabios_pgtable(int fd) {
+	int r = ioctl(fd,TVBOX_I8XX_SET_VGA_BIOS_PGTABLE);
+	if (r) fprintf(stderr,"Failed to TVBOX_I8XX_SET_VGA_BIOS_PGTABLE, %s\n",strerror(errno));
+	return r;
+}
+
 int main() {
 	int fd = open("/dev/tvbox_i8xx",O_RDWR);
 	if (fd < 0) {
@@ -62,6 +83,14 @@ int main() {
 
 	printf("Device open, asking info\n");
 	if (show_info(fd)) return 2;
+
+	printf("I'm going to test switching to a default sane pgtable\n");
+	countdown(3);
+	if (def_pgtable(fd)) return 3;
+
+	printf("I'm going to test switching to VGA BIOS pgtable\n");
+	countdown(3);
+	if (vgabios_pgtable(fd)) return 3;
 
 	close(fd);
 	return 0;
