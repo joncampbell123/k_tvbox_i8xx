@@ -652,6 +652,13 @@ static void pgtable_make_pierce_the_veil(volatile uint32_t *pgt) {
 static void pgtable_default_our_buffer(void) {
 	pgtable_make_default(pgtable);
 	intel_switch_pgtable(pgtable_base_phys);
+
+	/* direct h/w status to our buffer */
+	if (intel_stolen_base != 0 && intel_stolen_size != 0 && hwst_base != 0) {
+		/* clear it first */
+		memset((char*)hwst_base,0,PAGE_SIZE);
+		set_hws_pga(hwst_base_phys);
+	}
 }
 
 /* generate safe pagetable, and point the Intel chipset at it.
@@ -688,6 +695,10 @@ static void pgtable_vesa_bios_default(void) {
 
 	/* now switch pagetable to THAT */
 	intel_switch_pgtable(intel_stolen_base + vesa_bios_pgtable_offset);
+
+	/* restore h/w status register */
+	if (intel_stolen_base != 0 && intel_stolen_size != 0)
+		set_hws_pga(intel_stolen_base + intel_stolen_size - 4096);
 
 	/* at this point the contents of our table no longer matter.
 	 * that is good---it's a safe default to fall back on so that
@@ -943,13 +954,6 @@ static int __init tvbox_i8xx_init(void) {
 	DBG("Redirecting screen to my local pagetable, away from VESA BIOS");
 	pgtable_default_our_buffer();
 
-	/* direct h/w status to our buffer */
-	if (intel_stolen_base != 0 && intel_stolen_size != 0 && hwst_base != 0) {
-		/* clear it first */
-		memset((char*)hwst_base,0,PAGE_SIZE);
-		set_hws_pga(hwst_base_phys);
-	}
-
 	return 0; /* OK */
 }
 
@@ -958,10 +962,6 @@ static void __exit tvbox_i8xx_cleanup(void) {
 		DBG("Restoring framebuffer and pagetable");
 		pgtable_vesa_bios_default();
 	}
-
-	/* restore h/w status register */
-	if (intel_stolen_base != 0 && intel_stolen_size != 0)
-		set_hws_pga(intel_stolen_base + intel_stolen_size - 4096);
 
 	DBG("Unregistering device");
 	misc_deregister(&tvbox_i8xx_dev);
