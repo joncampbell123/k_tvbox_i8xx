@@ -835,11 +835,11 @@ static int tvbox_i8xx_mmap(struct file *file,struct vm_area_struct *vma) {
 	vma->vm_flags |= VM_IO;
 	vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
 
-	if (vma->vm_pgoff == 0) {
+	if (vma->vm_pgoff == (pgtable_base_phys >> PAGE_SHIFT)) {
 		if (size <= pgtable_size)
 			r = io_remap_pfn_range(vma, vma->vm_start, pgtable_base_phys >> PAGE_SHIFT, size, vma->vm_page_prot);
 	}
-	else if (vma->vm_pgoff == (pgtable_size >> PAGE_SHIFT)) {
+	else if (vma->vm_pgoff == (hwst_base_phys >> PAGE_SHIFT)) {
 		if (size <= PAGE_SIZE)
 			r = io_remap_pfn_range(vma, vma->vm_start, hwst_base_phys >> PAGE_SHIFT, PAGE_SIZE, vma->vm_page_prot);
 	}
