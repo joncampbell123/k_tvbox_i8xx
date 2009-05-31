@@ -828,12 +828,23 @@ static int tvbox_i8xx_release(struct inode *inode, struct file *file) {
 
 static int tvbox_i8xx_mmap(struct file *file,struct vm_area_struct *vma) {
 	size_t size = vma->vm_end - vma->vm_start;
+	int r=1;
 
 	DBG_("mmap vm_start=0x%08X vm_pgoff=0x%08X",(unsigned int)vma->vm_start,(unsigned int)vma->vm_pgoff);
 
 	vma->vm_flags |= VM_IO;
 	vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
-	if (io_remap_pfn_range(vma, vma->vm_start, (vma->vm_pgoff + pgtable_base_phys) >> PAGE_SHIFT, size, vma->vm_page_prot)) {
+
+	if (vma->vm_pgoff == 0) {
+		if (size <= pgtable_size)
+			r = io_remap_pfn_range(vma, vma->vm_start, pgtable_base_phys >> PAGE_SHIFT, size, vma->vm_page_prot);
+	}
+	else if (vma->vm_pgoff == (pgtable_size >> PAGE_SHIFT)) {
+		if (size <= PAGE_SIZE)
+			r = io_remap_pfn_range(vma, vma->vm_start, hwst_base_phys >> PAGE_SHIFT, PAGE_SIZE, vma->vm_page_prot);
+	}
+
+	if (r) {
 		DBG("mmap fail");
 		return -EAGAIN;
 	}
