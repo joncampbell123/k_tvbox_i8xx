@@ -186,6 +186,33 @@ static int alloc_pgtable(void) {
 	return 0;
 }
 
+/* for safety's sake we also maintain for userspace the 4KB page associated with the Hardware Status Page.
+ * if we let userspace point it at itself, we risk memory corruption in the event the program terminates
+ * without resetting it (whatever takes it's place is overwritten with status) */
+static unsigned long	hwst_base = 0;
+static unsigned long	hwst_base_phys = 0;
+
+void free_hwst_page(void) {
+	if (hwst_base != 0) {
+		free_page((unsigned long)hwst_base);
+		hwst_base_phys = 0;
+		hwst_base = 0;
+	}
+}
+
+int alloc_hwst_page(void) {
+	if (hwst_base == 0) {
+		hwst_base = __get_free_page(GFP_KERNEL);
+		if (hwst_base == 0)
+			return 1;
+
+		hwst_base_phys = virt_to_phys((void*)hwst_base);
+		DBG_("alloc hardware status page @ 0x%08lX",(unsigned long)hwst_base_phys);
+	}
+
+	return 0;
+}
+
 /* on every Intel graphics-based laptop I own, the BIOS takes 8MB off the top of RAM (just underneath
  * the SMM area) and declares that the framebuffer. The VESA BIOS on top of that takes the last 512KB
  * of the "framebuffer" and builds a page-table there, giving VESA BIOS clients 7.5MB of video memory
@@ -738,6 +765,8 @@ static long tvbox_i8xx_ioctl_ginfo(struct tvbox_i8xx_info __user *u_nfo) {
 	i.chipset		= chipset;
 	i.pgtable_base		= pgtable_base_phys;
 	i.pgtable_size		= pgtable_size;
+	i.hwst_base		= hwst_base_phys;
+	i.hwst_size		= PAGE_SIZE;
 	return copy_to_user(u_nfo,&i,sizeof(i));
 }
 
@@ -867,9 +896,17 @@ static int __init tvbox_i8xx_init(void) {
 		return -ENOMEM;
 	}
 
+	DBG("Allocating hw status page");
+	if (alloc_hwst_page()) {
+		DBG("cannot alloc");
+		free_pgtable();
+		return -ENOMEM;
+	}
+
 	DBG("Mapping MMIO");
 	if (map_mmio()) {
 		free_pgtable();
+		free_hwst_page();
 		DBG("cannot mmap");
 		return -ENOMEM;
 	}
@@ -878,6 +915,7 @@ static int __init tvbox_i8xx_init(void) {
 	if (misc_register(&tvbox_i8xx_dev)) {
 		unmap_mmio();
 		free_pgtable();
+		free_hwst_page();
 		DBG("Misc register failed!");
 		return -ENODEV;
 	}
@@ -900,6 +938,8 @@ static void __exit tvbox_i8xx_cleanup(void) {
 	misc_deregister(&tvbox_i8xx_dev);
 	DBG("Freeing pagetable");
 	free_pgtable();
+	DBG("Freeing hwst");
+	free_hwst_page();
 	DBG("Unmapping MMIO");
 	unmap_mmio();
 	DBG("Goodbye");

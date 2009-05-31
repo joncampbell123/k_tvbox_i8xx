@@ -37,6 +37,7 @@ static int show_info(int fd) {
 	printf("Aperature:             %-5luMB @ 0x%08lX\n",nfo.aperature_size>>20ULL,nfo.aperature_base);
 	printf("MMIO:                  %-5luKB @ 0x%08lX\n",nfo.mmio_size>>10ULL,nfo.mmio_base);
 	printf("Driver pgtable:        %-5luKB @ 0x%08lX\n",nfo.pgtable_size>>10ULL,nfo.pgtable_base);
+	printf("H/W status:            %-5luKB @ 0x%08lX\n",nfo.hwst_size>>10ULL,nfo.hwst_base);
 	printf("Chipset:               %s\n",get_chipset_name(nfo.chipset));
 
 	return 0;

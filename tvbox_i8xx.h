@@ -1,3 +1,5 @@
+#ifndef __TVBOX_I8XX_H
+#define __TVBOX_I8XX_H
 
 #define DEBUG_ME
 
@@ -38,6 +40,10 @@ struct tvbox_i8xx_info {
 /* physical buffer info */
 	unsigned long		pgtable_base;
 	unsigned long		pgtable_size;
+
+/* hardware status page */
+	unsigned long		hwst_base;
+	unsigned long		hwst_size;
 } tvbox_i8xx_info;
 
 /* driver ioctls */
@@ -51,4 +57,6 @@ struct tvbox_i8xx_info {
 #define TVBOX_I8XX_PGTABLE_ACTIVATE		_IO ('I', 0x04)
 
 #define TVBOX_I8XX_MINOR	248
+
+#endif /* TVBOX_I8XX_H */
 
