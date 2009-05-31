@@ -79,7 +79,7 @@
 
 #include <linux/miscdevice.h>
 #include <linux/capability.h>
-#include <linux/semaphore.h>
+/*#include <linux/semaphore.h>*/
 #include <linux/spinlock.h>
 #include <linux/vmalloc.h>
 #include <linux/pagemap.h>
