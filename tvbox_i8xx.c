@@ -586,6 +586,12 @@ static void intel_switch_pgtable(unsigned long addr) {
 	MMIO(0x2020) = addr | other | 1;
 }
 
+/* set H/W status page address */
+static void set_hws_pga(unsigned long addr) {
+	DBG_("setting h/w status page = 0x%08lX",addr);
+	MMIO(0x2080) = addr & (~0xFFFUL);
+}
+
 /* generate a safe pagetable that restores framebuffer sanity.
  * overwrites the contents of pgtable to do it.
  * the result lies in system RAM in a buffer we allocated,
@@ -658,7 +664,7 @@ static void pgtable_pierce_the_veil(void) {
 /* pierce the veil to write into stolen memory, put a replacement table there (as if the Intel VGA BIOS has done it)
  * and then close it back up and walk away. */
 static void pgtable_vesa_bios_default(void) {
-	unsigned long vesa_bios_pgtable_offset = intel_stolen_size - pgtable_size;
+	unsigned long vesa_bios_pgtable_offset = intel_stolen_size - (pgtable_size + 0x4000);	/* make room for other structs */
 
 	pgtable_pierce_the_veil();
 
@@ -921,9 +927,17 @@ static int __init tvbox_i8xx_init(void) {
 	}
 
 	DBG_("Before init, page table control: 0x%08X",MMIO(0x2020));
+	DBG_("and h/w status @ 0x%08X",MMIO(0x2080));
 
 	DBG("Redirecting screen to my local pagetable, away from VESA BIOS");
 	pgtable_default_our_buffer();
+
+	/* direct h/w status to our buffer */
+	if (intel_stolen_base != 0 && intel_stolen_size != 0 && hwst_base != 0) {
+		/* clear it first */
+		memset((char*)hwst_base,0,PAGE_SIZE);
+		set_hws_pga(hwst_base_phys);
+	}
 
 	return 0; /* OK */
 }
@@ -933,6 +947,10 @@ static void __exit tvbox_i8xx_cleanup(void) {
 		DBG("Restoring framebuffer and pagetable");
 		pgtable_vesa_bios_default();
 	}
+
+	/* restore h/w status register */
+	if (intel_stolen_base != 0 && intel_stolen_size != 0)
+		set_hws_pga(intel_stolen_base + intel_stolen_size - 4096);
 
 	DBG("Unregistering device");
 	misc_deregister(&tvbox_i8xx_dev);
