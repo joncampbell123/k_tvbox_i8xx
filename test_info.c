@@ -297,7 +297,7 @@ int main() {
 	{
 		int i;
 		volatile uint32_t *x = (volatile uint32_t*)
-			mmap(NULL,nfo.pgtable_size,PROT_READ|PROT_WRITE,MAP_SHARED,fd,0);
+			mmap(NULL,nfo.pgtable_size,PROT_READ|PROT_WRITE,MAP_SHARED,fd,nfo.pgtable_base);
 		if (x == (volatile uint32_t*)(-1)) {
 			fprintf(stderr,"mmap failed\n");
 			return 1;
