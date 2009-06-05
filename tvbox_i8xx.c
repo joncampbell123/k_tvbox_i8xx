@@ -832,7 +832,16 @@ static int tvbox_i8xx_open(struct inode *inode, struct file *file) {
 
 static int tvbox_i8xx_release(struct inode *inode, struct file *file) {
 	spin_lock(&lock);
-	is_open--;
+	if (is_open) {
+		/* restore the page table---no questions asked.
+		 * or else, risk situations where the videomgr crashes or quit too early
+		 * and Linux fbcon is drawing on regions of the aperature mapped to
+		 * parts of System RAM that it just mapped other sensitive files into... */
+		DBG("char device is being released. restoring page tables");
+		pgtable_default_our_buffer();
+		/* okay we're done */
+		is_open--;
+	}
 	spin_unlock(&lock);
 	return 0;
 }
