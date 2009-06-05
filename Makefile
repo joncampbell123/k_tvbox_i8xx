@@ -1,7 +1,8 @@
 obj-m += tvbox_i8xx.o
 
 ifndef $(KDIR)
-KDIR=/usr/src/linux-2.6.28
+KDIR=/usr/src/linux-2.6.25.20
+#KDIR=/usr/src/linux-2.6.28
 #KDIR=/usr/src/linux-2.6.28.8
 #KDIR=/mnt/sda1/ext2/usr/src/2.6.28.10
 endif
