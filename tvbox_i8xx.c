@@ -275,8 +275,11 @@ static size_t find_intel_aperature(struct pci_dev *dev,size_t *c_base) {
 		/* the aperature/framebuffer is the large one that is marked "prefetchable" */
 		if ((res->flags & IORESOURCE_MEM) && (res->flags & IORESOURCE_PREFETCH) &&
 			!(res->flags & IORESOURCE_DISABLED) && res->start != 0 && base == 0) {
-			base = res->start;
-			size = (res->end - res->start) + 1;
+			/* the aperature must exist below 4GB boundary */
+			if (sizeof(res->start) > 4 && res->start < 0xFFFF0000 && res->end < 0xFFFF0000) {
+				base = res->start;
+				size = (res->end - res->start) + 1;
+			}
 		}
 	}
 
@@ -296,8 +299,11 @@ static size_t find_intel_mmio(struct pci_dev *dev,size_t *c_base) {
 		/* the aperature/framebuffer is the small one that is marked "non-prefetchable" */
 		if ((res->flags & IORESOURCE_MEM) && !(res->flags & IORESOURCE_PREFETCH) &&
 			!(res->flags & IORESOURCE_DISABLED) && res->start != 0 && base == 0) {
-			base = res->start;
-			size = (res->end - res->start) + 1;
+			/* the aperature must exist below 4GB boundary */
+			if (sizeof(res->start) > 4 && res->start < 0xFFFF0000 && res->end < 0xFFFF0000) {
+				base = res->start;
+				size = (res->end - res->start) + 1;
+			}
 		}
 	}
 
