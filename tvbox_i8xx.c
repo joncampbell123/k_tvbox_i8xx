@@ -198,7 +198,6 @@ static int alloc_pgtable(void) {
 
 	return 0;
 }
-#endif
 
 /* for safety's sake we also maintain for userspace the 4KB page associated with the Hardware Status Page.
  * if we let userspace point it at itself, we risk memory corruption in the event the program terminates
@@ -226,6 +225,7 @@ int alloc_hwst_page(void) {
 
 	return 0;
 }
+#endif
 
 /* on every Intel graphics-based laptop I own, the BIOS takes 8MB off the top of RAM (just underneath
  * the SMM area) and declares that the framebuffer. The VESA BIOS on top of that takes the last 512KB
@@ -709,8 +709,8 @@ static long tvbox_i8xx_ioctl_ginfo(struct tvbox_i8xx_info __user *u_nfo) {
 	i.chipset		= chipset;
 	i.pgtable_base		= 0;	/* pgtable_base_phys; */
 	i.pgtable_size		= pgtable_size;
-	i.hwst_base		= hwst_base_phys;
-	i.hwst_size		= PAGE_SIZE;
+	i.hwst_base		= 0;	/* hwst_base_phys; */
+	i.hwst_size		= 0;	/* PAGE_SIZE; */
 	return copy_to_user(u_nfo,&i,sizeof(i));
 }
 
@@ -773,7 +773,9 @@ static int tvbox_i8xx_release(struct inode *inode, struct file *file) {
 }
 
 static int tvbox_i8xx_mmap(struct file *file,struct vm_area_struct *vma) {
+#if 0
 	size_t size = vma->vm_end - vma->vm_start;
+#endif
 	int r=1;
 
 	DBG_("mmap vm_start=0x%08X vm_pgoff=0x%08X",(unsigned int)vma->vm_start,(unsigned int)vma->vm_pgoff);
@@ -786,12 +788,11 @@ static int tvbox_i8xx_mmap(struct file *file,struct vm_area_struct *vma) {
 		if (size <= pgtable_size)
 			r = io_remap_pfn_range(vma, vma->vm_start, pgtable_base_phys >> PAGE_SHIFT, size, vma->vm_page_prot);
 	}
-	else
-#endif
-	if (vma->vm_pgoff == (hwst_base_phys >> PAGE_SHIFT)) {
+	else if (vma->vm_pgoff == (hwst_base_phys >> PAGE_SHIFT)) {
 		if (size <= PAGE_SIZE)
 			r = io_remap_pfn_range(vma, vma->vm_start, hwst_base_phys >> PAGE_SHIFT, PAGE_SIZE, vma->vm_page_prot);
 	}
+#endif
 
 	if (r) {
 		DBG("mmap fail");
@@ -862,23 +863,21 @@ static int __init tvbox_i8xx_init(void) {
 		DBG("cannot alloc");
 		return -ENOMEM;
 	}
-#endif
 
 	DBG("Allocating hw status page");
 	if (alloc_hwst_page()) {
 		DBG("cannot alloc");
-#if 0
 		free_pgtable();
-#endif
 		return -ENOMEM;
 	}
+#endif
 
 	DBG("Mapping MMIO");
 	if (map_mmio()) {
 #if 0
 		free_pgtable();
-#endif
 		free_hwst_page();
+#endif
 		DBG("cannot mmap");
 		return -ENOMEM;
 	}
@@ -888,8 +887,8 @@ static int __init tvbox_i8xx_init(void) {
 		unmap_mmio();
 #if 0
 		free_pgtable();
-#endif
 		free_hwst_page();
+#endif
 		DBG("Misc register failed!");
 		return -ENODEV;
 	}
@@ -911,9 +910,9 @@ static void __exit tvbox_i8xx_cleanup(void) {
 #if 0
 	DBG("Freeing pagetable");
 	free_pgtable();
-#endif
 	DBG("Freeing hwst");
 	free_hwst_page();
+#endif
 	DBG("Unmapping MMIO");
 	unmap_mmio();
 	DBG("Goodbye");
