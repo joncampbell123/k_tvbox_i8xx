@@ -242,6 +242,9 @@ static volatile uint32_t*	mmio = NULL;
 
 #define MMIO(x)			( *( mmio + ((x) >> 2) ) )
 
+/* Intel specicially documents that half the PCI range is the MMIO, and the other half a direct window into the GTT */
+#define GTT(x)			MMIO(((x) << 2) + (mmio_size>>1))
+
 static int map_mmio(void) {
 	if (mmio_base == 0 || mmio_size == 0)
 		return -ENODEV;
@@ -392,6 +395,7 @@ static int get_965_stolen_memory_info(struct pci_bus *bus) {
 	switch ((w >> 4) & 7) {
 		case 1:	intel_stolen_size = MB(1);	break;
 		case 3: intel_stolen_size = MB(8);	break;
+		case 5:	intel_stolen_size = MB(32);	break;	/* undocumented, seen on a motherboard of mine */
 	}
 
 	/* the 965 has an explicit register for "top of memory", use that */
@@ -541,6 +545,7 @@ static int find_intel_graphics(void) {
 
 		switch (dev->device) {
 			case 0x2A02:
+			case 0x2E22:
 				chipset = CHIP_965;
 				DBG_("  PCI slot %d, found 965 chipset",slot);
 				ret = get_965_info(bus,slot);
@@ -566,7 +571,7 @@ static int find_intel_graphics(void) {
 
 /* write page table register to change mapping */
 static void intel_switch_pgtable(unsigned long addr) {
-	uint32_t other = 0;
+	uint32_t other = 0,i;
 
 	if (chipset == CHIP_965) {
 		/* 965 also wants the size of the page table.
@@ -590,6 +595,15 @@ static void intel_switch_pgtable(unsigned long addr) {
 
 	DBG_("setting page table control = 0x%08lX",addr | other | 1);
 	MMIO(0x2020) = addr | other | 1;
+
+	/* flush */
+	MMIO(0x2170) = 0;
+	MMIO(0x2170) = ~0;
+	MMIO(0x2170) = 0;
+
+	/* flush, damn you! */
+	for (i=0;i < pgtable_entries;i++)
+		GTT(i) = pgtable[i];
 }
 
 /* set H/W status page address */
@@ -638,12 +652,7 @@ static void pgtable_make_pierce_the_veil(volatile uint32_t *pgt) {
 
 	DBG("making veil-piercing table");
 
-#if 0
-	/* no, don't risk security by exposing SMM memory... */
-	while (addr < aperature_size && page < pgtable_entries && addr < (intel_total_memory - intel_stolen_base)) {
-#else
 	while (addr < aperature_size && page < pgtable_entries && addr < intel_stolen_size) {
-#endif
 		pgt[page++] = (intel_stolen_base + addr) | 1;
 		addr += PAGE_SIZE;
 	}
