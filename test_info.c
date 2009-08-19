@@ -291,6 +291,7 @@ int main() {
 
         if (def_pgtable(fd)) return 3;
 
+#if 0
 	printf("Going to memory-map it now...\n");
 	countdown(3);
 
@@ -336,6 +337,7 @@ int main() {
 
 		munmap((void*)x,nfo.pgtable_size);
 	}
+#endif
 
 	close(fd);
 	return 0;

@@ -16,6 +16,16 @@
  *
  * (C) 2009 Impact Studio Pro.
  *
+ * 2009/08/17: don't modify PAGE_CNTL anymore, we seem to be
+ *             coming across motherboards with weird values
+ *             at startup that imply strange remapping at work.
+ *             rather than risk corrupting some region of memory,
+ *             it's best to just use the GTT part of the MMIO
+ *             register space to update.
+ *
+ *             Our pgtable is from now on a backup copy, not the
+ *             live copy.
+ *
  * TODO: This code works great so far on current test hardware. No
  *       visible glitching. Works equally well on x86-64 kernels.
  *
@@ -108,12 +118,13 @@
 #endif
 
 static unsigned long MB(unsigned long x) { return x << 20UL; }
-static unsigned long KB(unsigned long x) { return x << 10UL; }
+// static unsigned long KB(unsigned long x) { return x << 10UL; }
 
 /* this is a one-process-at-a-time driver, no concurrent issues that way */
 static unsigned int	is_open = 0;
 static spinlock_t	lock = SPIN_LOCK_UNLOCKED;
 
+#if 0
 /* on behalf of the user-space application we grab a 512KB region and hold onto it.
  * Intel's page table design allows the framebuffer and AGP aperature to literally happen anywhere
  * in system RAM even if far-flung across fragmented pages, BUT the page table itself must exist
@@ -127,11 +138,13 @@ static spinlock_t	lock = SPIN_LOCK_UNLOCKED;
 static uint32_t*	pgtable = NULL;
 static unsigned long	pgtable_base = 0;
 static size_t		pgtable_base_phys = 0;
-static size_t		pgtable_size = 0;
 static unsigned int	pgtable_order = 0;
+#endif
+static size_t		pgtable_size = 0;
 /* handy way for programmer reference. pgtable_size is in bytes */
 #define pgtable_entries (pgtable_size / 4)
 
+#if 0
 static void free_pgtable(void) {
 	if (pgtable_base) {
 		DBG("Freeing pagetable");
@@ -185,6 +198,7 @@ static int alloc_pgtable(void) {
 
 	return 0;
 }
+#endif
 
 /* for safety's sake we also maintain for userspace the 4KB page associated with the Hardware Status Page.
  * if we let userspace point it at itself, we risk memory corruption in the event the program terminates
@@ -569,43 +583,6 @@ static int find_intel_graphics(void) {
 	return ret;
 }
 
-/* write page table register to change mapping */
-static void intel_switch_pgtable(unsigned long addr) {
-	uint32_t other = 0,i;
-
-	if (chipset == CHIP_965) {
-		/* 965 also wants the size of the page table.
-		 * this is a must especially when pointing to the fake
-		 * recreation of VESA BIOS page table at top of RAM.
-		 * If the chipset thinks our table extends past the top
-		 * it won't use it and the user sees random garbage on their display. */
-		if (pgtable_size >= KB(2048))
-			other = 4 << 1;
-		else if (pgtable_size >= KB(1024+512))
-			other = 5 << 1;
-		else if (pgtable_size >= KB(1024))
-			other = 3 << 1;
-		else if (pgtable_size >= KB(512))
-			other = 0 << 1;
-		else if (pgtable_size >= KB(256))
-			other = 1 << 1;
-		else
-			other = 2 << 1;	/* 128KB */
-	}
-
-	DBG_("setting page table control = 0x%08lX",addr | other | 1);
-	MMIO(0x2020) = addr | other | 1;
-
-	/* flush */
-	MMIO(0x2170) = 0;
-	MMIO(0x2170) = ~0;
-	MMIO(0x2170) = 0;
-
-	/* flush, damn you! */
-	for (i=0;i < pgtable_entries;i++)
-		GTT(i) = pgtable[i];
-}
-
 /* set H/W status page address */
 static void set_hws_pga(unsigned long addr) {
 	DBG_("setting h/w status page = 0x%08lX",addr);
@@ -616,104 +593,40 @@ static void set_hws_pga(unsigned long addr) {
  * overwrites the contents of pgtable to do it.
  * the result lies in system RAM in a buffer we allocated,
  * but mimicks the layout used by Intel's VGA BIOS (see above for comments) */
-static void pgtable_make_default(volatile uint32_t *pgt) {
+static void pgtable_restore(void) {
 	unsigned int page=0,addr=0;
 	unsigned int def_sz = intel_stolen_size - pgtable_size;
 
 	DBG_("making default pgtable. pgtable sz=%u",def_sz);
 
 	while (addr < aperature_size && page < pgtable_entries && addr < def_sz) {
-		pgt[page++] = (intel_stolen_base + addr) | 1;
+		GTT(page) = (intel_stolen_base + addr) | 1;
 		addr += PAGE_SIZE;
+		page++;
 	}
 
 	/* map out page table itself by repeating last entry */
 	while (addr < aperature_size && page < pgtable_entries) {
-		pgt[page] = pgtable[page-1];
+		GTT(page) = GTT(page-1);
 		addr += PAGE_SIZE;
 		page++;
 	}
 
 	/* fill rest with zero */
-	while (page < pgtable_entries)
-		pgt[page++] = 0;
-}
-
-/* like pgtable_make_default() but purposely maps in the page table itself
- * and the system management mode area, so we can "pierce the veil" that
- * Intel's chipsets put in place to normally hide these areas (writes to the
- * "stolen" area and reads from it are terminated by the bridge).
- *
- * this is typically used by the code to open up the stolen area, write in
- * a replacement table, redirect to that, and then leave the system in a state
- * as if the Intel VGA BIOS had done it. */
-static void pgtable_make_pierce_the_veil(volatile uint32_t *pgt) {
-	unsigned int page=0,addr=0;
-
-	DBG("making veil-piercing table");
-
-	while (addr < aperature_size && page < pgtable_entries && addr < intel_stolen_size) {
-		pgt[page++] = (intel_stolen_base + addr) | 1;
-		addr += PAGE_SIZE;
+	while (page < pgtable_entries) {
+		GTT(page) = 0;
+		page++;
 	}
-
-	/* fill rest with zero */
-	while (page < pgtable_entries)
-		pgt[page++] = 0;
-}
-
-/* generate safe pagetable, and point the Intel chipset at it.
- * after this call, the active framebuffer is our buffer. be careful! */
-static void pgtable_default_our_buffer(void) {
-	pgtable_make_default(pgtable);
-	intel_switch_pgtable(pgtable_base_phys);
-
-	/* direct h/w status to our buffer */
-	if (intel_stolen_base != 0 && intel_stolen_size != 0 && hwst_base != 0) {
-		/* clear it first */
-		memset((char*)hwst_base,0,PAGE_SIZE);
-		set_hws_pga(hwst_base_phys);
-	}
-}
-
-/* generate safe pagetable, and point the Intel chipset at it.
- * after this call, the active framebuffer is our buffer. be careful! */
-static void pgtable_pierce_the_veil(void) {
-	pgtable_make_pierce_the_veil(pgtable);
-	intel_switch_pgtable(pgtable_base_phys);
 }
 
 /* pierce the veil to write into stolen memory, put a replacement table there (as if the Intel VGA BIOS has done it)
  * and then close it back up and walk away. */
 static void pgtable_vesa_bios_default(void) {
-	unsigned long vesa_bios_pgtable_offset = intel_stolen_size - (pgtable_size + 0x4000);	/* make room for other structs */
-
-	pgtable_pierce_the_veil();
-
-	DBG("veil pierced, writing replacement table up in stolen area");
-
-	/* stolen mem area open, write in a replacement table */
-	{
-		volatile uint32_t *npt;
-		unsigned long pho = aperature_base + vesa_bios_pgtable_offset;
-		DBG_("writing to aperature @ 0x%08lX + 0x%08lX = 0x%08lX",(unsigned long)aperature_base,
-			(unsigned long)vesa_bios_pgtable_offset,pho);
-
-		npt = (volatile uint32_t*)ioremap(pho,pgtable_size);
-		if (npt == NULL) {
-			DBG("Shit! Cannot ioremap that area! Leaving it as-is for safety");
-			return;
-		}
-		pgtable_make_default(npt);
-		iounmap((void*)npt);
-	}
-
-	/* now switch pagetable to THAT */
-	intel_switch_pgtable(intel_stolen_base + vesa_bios_pgtable_offset);
+	pgtable_restore();
 
 	/* restore h/w status register */
 	if (intel_stolen_base != 0 && intel_stolen_size != 0)
-		set_hws_pga(intel_stolen_base + intel_stolen_size - 4096);
+		set_hws_pga(intel_stolen_base + (intel_stolen_size>>1));	/* <- we have to point it SOMEWHERE */
 
 	/* at this point the contents of our table no longer matter.
 	 * that is good---it's a safe default to fall back on so that
@@ -743,7 +656,7 @@ static ssize_t tvbox_i8xx_write(struct file *file, const char __user *buf, size_
 			break;
 		}
 
-		pgtable[pos++] = word;
+		GTT(pos++) = word;
 		count -= sizeof(uint32_t);
 		buf += sizeof(uint32_t);
 		ret += sizeof(uint32_t);
@@ -769,8 +682,7 @@ static ssize_t tvbox_i8xx_read(struct file *file, char __user *buf, size_t count
 		if (pos >= pgtable_entries)
 			break;
 
-		word = pgtable[pos++];
-/*		DBG_("read @ %lu: 0x%08lX",(unsigned long)(pos << 2ULL),(unsigned long)word); */
+		word = GTT(pos++);
 		if (put_user(word,(uint32_t *)buf)) {
 			ret = -EFAULT;
 			break;
@@ -795,7 +707,7 @@ static long tvbox_i8xx_ioctl_ginfo(struct tvbox_i8xx_info __user *u_nfo) {
 	i.mmio_base		= mmio_base;
 	i.mmio_size		= mmio_size;
 	i.chipset		= chipset;
-	i.pgtable_base		= pgtable_base_phys;
+	i.pgtable_base		= 0;	/* pgtable_base_phys; */
 	i.pgtable_size		= pgtable_size;
 	i.hwst_base		= hwst_base_phys;
 	i.hwst_size		= PAGE_SIZE;
@@ -812,7 +724,7 @@ static long tvbox_i8xx_ioctl(struct file *file, unsigned int cmd, unsigned long 
 			ret = tvbox_i8xx_ioctl_ginfo((struct tvbox_i8xx_info __user *)arg);
 			break;
 		case TVBOX_I8XX_SET_DEFAULT_PGTABLE:
-			pgtable_default_our_buffer();
+			pgtable_restore();
 			ret = 0;
 			break;
 		case TVBOX_I8XX_SET_VGA_BIOS_PGTABLE:
@@ -820,7 +732,6 @@ static long tvbox_i8xx_ioctl(struct file *file, unsigned int cmd, unsigned long 
 			ret = 0;
 			break;
 		case TVBOX_I8XX_PGTABLE_ACTIVATE:
-			intel_switch_pgtable(pgtable_base_phys);
 			ret = 0;
 			break;
 	}
@@ -853,7 +764,7 @@ static int tvbox_i8xx_release(struct inode *inode, struct file *file) {
 		 * and Linux fbcon is drawing on regions of the aperature mapped to
 		 * parts of System RAM that it just mapped other sensitive files into... */
 		DBG("char device is being released. restoring page tables");
-		pgtable_default_our_buffer();
+		pgtable_restore();
 		/* okay we're done */
 		is_open--;
 	}
@@ -870,11 +781,14 @@ static int tvbox_i8xx_mmap(struct file *file,struct vm_area_struct *vma) {
 	vma->vm_flags |= VM_IO;
 	vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
 
+#if 0
 	if (vma->vm_pgoff == (pgtable_base_phys >> PAGE_SHIFT)) {
 		if (size <= pgtable_size)
 			r = io_remap_pfn_range(vma, vma->vm_start, pgtable_base_phys >> PAGE_SHIFT, size, vma->vm_page_prot);
 	}
-	else if (vma->vm_pgoff == (hwst_base_phys >> PAGE_SHIFT)) {
+	else
+#endif
+	if (vma->vm_pgoff == (hwst_base_phys >> PAGE_SHIFT)) {
 		if (size <= PAGE_SIZE)
 			r = io_remap_pfn_range(vma, vma->vm_start, hwst_base_phys >> PAGE_SHIFT, PAGE_SIZE, vma->vm_page_prot);
 	}
@@ -942,22 +856,28 @@ static int __init tvbox_i8xx_init(void) {
 		return -ENODEV;
 	}
 
+#if 0
 	DBG("Allocating block of physmem");
 	if (alloc_pgtable()) {
 		DBG("cannot alloc");
 		return -ENOMEM;
 	}
+#endif
 
 	DBG("Allocating hw status page");
 	if (alloc_hwst_page()) {
 		DBG("cannot alloc");
+#if 0
 		free_pgtable();
+#endif
 		return -ENOMEM;
 	}
 
 	DBG("Mapping MMIO");
 	if (map_mmio()) {
+#if 0
 		free_pgtable();
+#endif
 		free_hwst_page();
 		DBG("cannot mmap");
 		return -ENOMEM;
@@ -966,31 +886,32 @@ static int __init tvbox_i8xx_init(void) {
 	DBG_("Registering char dev misc, minor %d",TVBOX_I8XX_MINOR);
 	if (misc_register(&tvbox_i8xx_dev)) {
 		unmap_mmio();
+#if 0
 		free_pgtable();
+#endif
 		free_hwst_page();
 		DBG("Misc register failed!");
 		return -ENODEV;
 	}
 
-	DBG_("Before init, page table control: 0x%08X",MMIO(0x2020));
-	DBG_("and h/w status @ 0x%08X",MMIO(0x2080));
-
 	DBG("Redirecting screen to my local pagetable, away from VESA BIOS");
-	pgtable_default_our_buffer();
+	pgtable_restore();
 
 	return 0; /* OK */
 }
 
 static void __exit tvbox_i8xx_cleanup(void) {
-	if (pgtable != NULL && mmio != NULL) {
+	if (mmio != NULL) {
 		DBG("Restoring framebuffer and pagetable");
 		pgtable_vesa_bios_default();
 	}
 
 	DBG("Unregistering device");
 	misc_deregister(&tvbox_i8xx_dev);
+#if 0
 	DBG("Freeing pagetable");
 	free_pgtable();
+#endif
 	DBG("Freeing hwst");
 	free_hwst_page();
 	DBG("Unmapping MMIO");

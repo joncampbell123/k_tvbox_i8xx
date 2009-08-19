@@ -53,7 +53,7 @@ struct tvbox_i8xx_info {
 #define TVBOX_I8XX_SET_DEFAULT_PGTABLE		_IO ('I', 0x02)
 /* --- instruct driver to restore Intel VGA BIOS pgtable in stolen RAM. destroys our pgtable in the process */
 #define TVBOX_I8XX_SET_VGA_BIOS_PGTABLE		_IO ('I', 0x03)
-/* --- instruct driver to make allocated pgtable the active buffer */
+/* --- instruct driver to make allocated pgtable the active buffer -- DISABLED */
 #define TVBOX_I8XX_PGTABLE_ACTIVATE		_IO ('I', 0x04)
 
 #define TVBOX_I8XX_MINOR	248
