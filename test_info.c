@@ -10,7 +10,7 @@
 #include <fcntl.h>
 #include <errno.h>
 
-#include "tvbox_i8xx.h"
+#include "tvbox_9xx.h"
 
 static const char *get_chipset_name(unsigned int fd) {
 	static char tmp_n[64];

@@ -107,7 +107,7 @@
 #include <linux/fs.h>
 #include <asm/io.h>
 
-#include "tvbox_i8xx.h"
+#include "tvbox_9xx.h"
 
 #if defined(DEBUG_ME)
 # define DBG_(x,...) printk(KERN_INFO "tvbox_i8xx: " x "\n", __VA_ARGS__ )
