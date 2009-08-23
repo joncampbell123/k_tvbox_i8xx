@@ -30,6 +30,7 @@ unload:
 	rmmod tvbox_9xx || true
 
 dev:
+	mkdir -p $(ROOT)/dev
 	rm -f $(ROOT)/dev/tvbox_9xx
 	mknod $(ROOT)/dev/tvbox_9xx c 10 248
 
