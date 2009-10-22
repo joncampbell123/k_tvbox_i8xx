@@ -559,6 +559,7 @@ static int find_intel_graphics(void) {
 
 		switch (dev->device) {
 			case 0x2A02:
+			case 0x2e32:
 			case 0x2E22:
 				chipset = CHIP_965;
 				DBG_("  PCI slot %d, found 965 chipset",slot);
