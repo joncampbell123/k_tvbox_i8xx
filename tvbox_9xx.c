@@ -415,15 +415,31 @@ static int get_965_stolen_memory_info(struct pci_bus *bus) {
 	/* the 965 has an explicit register for "top of memory", use that */
 	{
 		uint16_t w=0;
+		uint32_t dw=0;
+		uint64_t stolen_base;
+		uint64_t total_memory;
 		uint64_t total_upper_memory;
 		pci_bus_read_config_word(bus,PCI_DEVFN(0,0),0xB0,&w);
 		intel_total_memory = (w >> 4) << 20;
 		DBG_("Intel TOLUD = 0x%08lX",(unsigned long)intel_total_memory);
+
+		pci_bus_read_config_word(bus,PCI_DEVFN(0,0),0xA0,&w);
+		total_memory = ((uint64_t)w) << 26;
+		DBG_("Intel TOM = 0x%08llX",(unsigned long long)total_memory);
+
 		pci_bus_read_config_word(bus,PCI_DEVFN(0,0),0xA2,&w);
 		total_upper_memory = ((uint64_t)w) << 20;
 		DBG_("Intel TOUUD = 0x%08llX",(unsigned long long)total_upper_memory);
 
-		if (intel_total_memory != 0)
+		pci_bus_read_config_dword(bus,PCI_DEVFN(0,0),0xA4,&dw);
+		stolen_base = ((uint64_t)dw);
+		DBG_("Intel GBSM = 0x%08llX",(unsigned long long)stolen_base);
+
+		if (stolen_base != 0) {
+			intel_stolen_base = stolen_base;
+			intel_stolen_size = intel_total_memory - intel_stolen_base;
+		}
+		else if (intel_total_memory != 0)
 			intel_stolen_base = intel_total_memory - intel_stolen_size;
 	}
 
