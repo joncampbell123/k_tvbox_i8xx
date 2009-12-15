@@ -931,7 +931,9 @@ static int __init tvbox_i8xx_init(void) {
 
 	{
 		uint32_t pg = MMIO(0x2020);
+		uint32_t hw = MMIO(0x2080);
 		DBG_("Intel PGTBL_CTL = 0x%08lX",(unsigned long)pg);
+		DBG_("Intel HWS_PGA = 0x%08lX",(unsigned long)hw);
 	}
 
 	DBG("Redirecting screen to my local pagetable, away from VESA BIOS");
