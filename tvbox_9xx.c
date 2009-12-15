@@ -443,9 +443,9 @@ static int get_965_stolen_memory_info(struct pci_bus *bus) {
 			intel_stolen_base = intel_total_memory - intel_stolen_size;
 	}
 
-	/* uhhhhh some systems require us to look instead at the video controller... */
+	/* some versions of the chip don't respond to the DEVFN(0,0) GBSM register (readback 0x00000000)
+	 * so we need to look at BSM in the graphics device itself */
 	if (intel_stolen_size == 0 && intel_stolen_base != 0) {
-		uint16_t w=0;
 		uint32_t dw=0;
 
 		pci_bus_read_config_dword(bus,PCI_DEVFN(2,0),0x5C,&dw);
