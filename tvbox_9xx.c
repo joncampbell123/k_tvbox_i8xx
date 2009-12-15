@@ -406,7 +406,7 @@ static int get_965_stolen_memory_info(struct pci_bus *bus) {
 
 	DBG_("Intel 965 HHIB CFG word 0x52: 0x%04X",w);
 
-	switch ((w >> 4) & 7) {
+	switch ((w >> 4) & 0xF) {
 		case 1:	intel_stolen_size = MB(1);	break;
 		case 3: intel_stolen_size = MB(8);	break;
 		case 5:	intel_stolen_size = MB(32);	break;	/* undocumented, seen on a motherboard of mine */
@@ -415,9 +415,13 @@ static int get_965_stolen_memory_info(struct pci_bus *bus) {
 	/* the 965 has an explicit register for "top of memory", use that */
 	{
 		uint16_t w=0;
+		uint64_t total_upper_memory;
 		pci_bus_read_config_word(bus,PCI_DEVFN(0,0),0xB0,&w);
 		intel_total_memory = (w >> 4) << 20;
 		DBG_("Intel TOLUD = 0x%08lX",(unsigned long)intel_total_memory);
+		pci_bus_read_config_word(bus,PCI_DEVFN(0,0),0xA2,&w);
+		total_upper_memory = ((uint64_t)w) << 20;
+		DBG_("Intel TOUUD = 0x%08llX",(unsigned long long)total_upper_memory);
 
 		if (intel_total_memory != 0)
 			intel_stolen_base = intel_total_memory - intel_stolen_size;
@@ -561,6 +565,7 @@ static int find_intel_graphics(void) {
 			case 0x2A02:
 			case 0x2e32:
 			case 0x2E22:
+			case 0x2a42:
 				chipset = CHIP_965;
 				DBG_("  PCI slot %d, found 965 chipset",slot);
 				ret = get_965_info(bus,slot);
