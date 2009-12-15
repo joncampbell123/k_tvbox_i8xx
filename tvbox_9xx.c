@@ -406,7 +406,7 @@ static int get_965_stolen_memory_info(struct pci_bus *bus) {
 
 	DBG_("Intel 965 HHIB CFG word 0x52: 0x%04X",w);
 
-	switch ((w >> 4) & 0xF) {
+	switch ((w >> 4) & 0x7) {
 		case 1:	intel_stolen_size = MB(1);	break;
 		case 3: intel_stolen_size = MB(8);	break;
 		case 5:	intel_stolen_size = MB(32);	break;	/* undocumented, seen on a motherboard of mine */
@@ -441,6 +441,20 @@ static int get_965_stolen_memory_info(struct pci_bus *bus) {
 		}
 		else if (intel_total_memory != 0)
 			intel_stolen_base = intel_total_memory - intel_stolen_size;
+	}
+
+	/* uhhhhh some systems require us to look instead at the video controller... */
+	if (intel_stolen_size == 0 && intel_stolen_base != 0) {
+		uint16_t w=0;
+		uint32_t dw=0;
+
+		pci_bus_read_config_dword(bus,PCI_DEVFN(2,0),0x5C,&dw);
+		DBG_("Intel vid BSM = 0x%08lX",(unsigned long)dw);
+
+		if (dw != 0) {
+			intel_stolen_base = dw;
+			intel_stolen_size = intel_total_memory - intel_stolen_base;
+		}
 	}
 
 	/* take "total ram" estimate from Linux, round up to likely 32MB multiple,
