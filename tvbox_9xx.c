@@ -293,7 +293,7 @@ static size_t find_intel_aperature(struct pci_dev *dev,size_t *c_base) {
 		if ((res->flags & IORESOURCE_MEM) && (res->flags & IORESOURCE_PREFETCH) &&
 			!(res->flags & IORESOURCE_DISABLED) && res->start != 0 && base == 0) {
 			/* the aperature must exist below 4GB boundary */
-			if (sizeof(res->start) > 4 && res->start < 0xFFFF0000 && res->end < 0xFFFF0000) {
+			if ((sizeof(res->start) <= 4) || (res->start < 0xFFFF0000 && res->end < 0xFFFF0000)) {
 				base = res->start;
 				size = (res->end - res->start) + 1;
 			}
@@ -317,7 +317,7 @@ static size_t find_intel_mmio(struct pci_dev *dev,size_t *c_base) {
 		if ((res->flags & IORESOURCE_MEM) && !(res->flags & IORESOURCE_PREFETCH) &&
 			!(res->flags & IORESOURCE_DISABLED) && res->start != 0 && base == 0) {
 			/* the aperature must exist below 4GB boundary */
-			if (sizeof(res->start) > 4 && res->start < 0xFFFF0000 && res->end < 0xFFFF0000) {
+			if ((sizeof(res->start) <= 4) || (res->start < 0xFFFF0000 && res->end < 0xFFFF0000)) {
 				base = res->start;
 				size = (res->end - res->start) + 1;
 			}
@@ -409,7 +409,7 @@ static int get_965_stolen_memory_info(struct pci_bus *bus) {
 	switch ((w >> 4) & 0x7) {
 		case 1:	intel_stolen_size = MB(1);	break;
 		case 3: intel_stolen_size = MB(8);	break;
-		case 5:	intel_stolen_size = MB(32);	break;	/* undocumented, seen on a motherboard of mine */
+/*		case 5:	intel_stolen_size = MB(32);	break;	undocumented, seen on a motherboard of mine */
 	}
 
 	/* the 965 has an explicit register for "top of memory", use that */
@@ -435,26 +435,18 @@ static int get_965_stolen_memory_info(struct pci_bus *bus) {
 		stolen_base = ((uint64_t)dw);
 		DBG_("Intel GBSM = 0x%08llX",(unsigned long long)stolen_base);
 
+		if (stolen_base == 0) {
+			pci_bus_read_config_dword(bus,PCI_DEVFN(2,0),0x5C,&dw);
+			DBG_("Intel vid BSM = 0x%08lX",(unsigned long)dw);
+			if (dw != 0) stolen_base = dw;
+		}
+
 		if (stolen_base != 0) {
 			intel_stolen_base = stolen_base;
 			intel_stolen_size = intel_total_memory - intel_stolen_base;
 		}
-		else if (intel_total_memory != 0)
+		else if (intel_total_memory != 0 && intel_stolen_size != 0)
 			intel_stolen_base = intel_total_memory - intel_stolen_size;
-	}
-
-	/* some versions of the chip don't respond to the DEVFN(0,0) GBSM register (readback 0x00000000)
-	 * so we need to look at BSM in the graphics device itself */
-	if (intel_stolen_size == 0 && intel_stolen_base != 0) {
-		uint32_t dw=0;
-
-		pci_bus_read_config_dword(bus,PCI_DEVFN(2,0),0x5C,&dw);
-		DBG_("Intel vid BSM = 0x%08lX",(unsigned long)dw);
-
-		if (dw != 0) {
-			intel_stolen_base = dw;
-			intel_stolen_size = intel_total_memory - intel_stolen_base;
-		}
 	}
 
 	/* take "total ram" estimate from Linux, round up to likely 32MB multiple,
