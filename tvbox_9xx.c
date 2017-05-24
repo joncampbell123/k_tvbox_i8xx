@@ -212,7 +212,7 @@ static size_t find_intel_mmio(struct pci_dev *dev,size_t *c_base) {
 	for (bar=0;bar < PCI_ROM_RESOURCE;bar++) {
 		struct resource *res = &dev->resource[bar];
 
-		/* the aperature/framebuffer is the small one that is marked "non-prefetchable" */
+		/* the mmio is the small one that is marked "non-prefetchable" */
 		if ((res->flags & IORESOURCE_MEM) && !(res->flags & IORESOURCE_PREFETCH) &&
 			!(res->flags & IORESOURCE_DISABLED) && res->start != 0 && base == 0) {
 			/* the aperature must exist below 4GB boundary */
