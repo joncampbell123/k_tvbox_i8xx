@@ -5,8 +5,6 @@
  * that's unbroken and uncached, so that userspace can worry about
  * the rest.
  *
- * THIS IS NOT OPEN SOURCE.
- *
  * We do not concern ourself with the possibility of multiple Intel
  * graphics chipsets, because the graphics device is never really
  * an independent device, it's always an embedded part of the
