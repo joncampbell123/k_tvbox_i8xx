@@ -122,108 +122,9 @@ static unsigned long MB(unsigned long x) { return x << 20UL; }
 static unsigned int	is_open = 0;
 static spinlock_t	lock = SPIN_LOCK_UNLOCKED;
 
-#if 0
-/* on behalf of the user-space application we grab a 512KB region and hold onto it.
- * Intel's page table design allows the framebuffer and AGP aperature to literally happen anywhere
- * in system RAM even if far-flung across fragmented pages, BUT the page table itself must exist
- * in an unbroken section of RAM that the CPU treats as uncacheable. So, if we do that part, user-space
- * can worry about the rest.
- *
- * the reason the code below us saves the sum of the aperatures is that on systems with a two-function
- * display controller the userspace daemon might want both to function at the same time, with separate
- * page tables for each. the page table has to be large enough have one DWORD per page of aperature.
- * two aperatures: double the space. */
-static uint32_t*	pgtable = NULL;
-static unsigned long	pgtable_base = 0;
-static size_t		pgtable_base_phys = 0;
-static unsigned int	pgtable_order = 0;
-#endif
 static size_t		pgtable_size = 0;
 /* handy way for programmer reference. pgtable_size is in bytes */
 #define pgtable_entries (pgtable_size / 4)
-
-#if 0
-static void free_pgtable(void) {
-	if (pgtable_base) {
-		DBG("Freeing pagetable");
-		set_memory_wb(pgtable_base,pgtable_size >> PAGE_SHIFT);
-		free_pages(pgtable_base,pgtable_order);
-		pgtable_base = (unsigned long)NULL;
-		pgtable_base_phys = 0;
-		pgtable_order = 0;
-		pgtable_size = 0;
-		pgtable = NULL;
-	}
-}
-
-static int alloc_pgtable(void) {
-	unsigned int pages = pgtable_size >> PAGE_SHIFT;
-	if (pages == 0) return -ENOMEM;
-
-	/* what "order" is the size? */
-	for (pgtable_order=0;((pages - 1) >> pgtable_order) != 0;) {
-		if (++pgtable_order >= 16) {	/* don't ask for anything too large */
-			DBG_("cannot compute order for %u pages",pages);
-			return -ENOMEM;
-		}
-	}
-
-	DBG_("pagetable: page order %u for %u pages",pgtable_order,pages);
-
-	pgtable_base = __get_free_pages(GFP_KERNEL,pgtable_order);
-	if (pgtable_base == 0) {
-		DBG("Allocation failed");
-		return -ENOMEM;
-	}
-
-	DBG_("pagetable: Allocated at 0x%08lX size 0x%08lX",(unsigned long)pgtable_base,(unsigned long)pgtable_size);
-	pgtable_base_phys = virt_to_phys((void*)pgtable_base);
-	DBG_("pagetable: Physical memory location 0x%08lX",(unsigned long)pgtable_base_phys);
-	pgtable = (uint32_t*)pgtable_base;
-
-	/* make sure it's "size aligned", intel h/w demands it.
-	 * fortunately, the Linux kernel seems to also return page orders that are size aligned */
-	{
-		unsigned long sz = 1UL << (PAGE_SHIFT + pgtable_order);
-		if ((pgtable_base & (sz - 1)) != 0)
-			DBG_("pagetable: Linux gave us non-size-aligned memory! 0x%08lX & 0x%08lX == 0x%08lX",
-				pgtable_base,sz-1,pgtable_base&sz);
-	}
-
-	/* finally, the region needs to be uncacheable so that our updates (or userspace's) take effect immediately */
-	if (set_memory_uc(pgtable_base,pages))
-		DBG("Warning, unable to make pages uncacheable");
-
-	return 0;
-}
-
-/* for safety's sake we also maintain for userspace the 4KB page associated with the Hardware Status Page.
- * if we let userspace point it at itself, we risk memory corruption in the event the program terminates
- * without resetting it (whatever takes it's place is overwritten with status) */
-static unsigned long	hwst_base = 0;
-static unsigned long	hwst_base_phys = 0;
-
-void free_hwst_page(void) {
-	if (hwst_base != 0) {
-		free_page((unsigned long)hwst_base);
-		hwst_base_phys = 0;
-		hwst_base = 0;
-	}
-}
-
-int alloc_hwst_page(void) {
-	if (hwst_base == 0) {
-		hwst_base = __get_free_page(GFP_KERNEL);
-		if (hwst_base == 0)
-			return 1;
-
-		hwst_base_phys = virt_to_phys((void*)hwst_base);
-		DBG_("alloc hardware status page @ 0x%08lX",(unsigned long)hwst_base_phys);
-	}
-
-	return 0;
-}
-#endif
 
 /* on every Intel graphics-based laptop I own, the BIOS takes 8MB off the top of RAM (just underneath
  * the SMM area) and declares that the framebuffer. The VESA BIOS on top of that takes the last 512KB
@@ -799,26 +700,12 @@ static int tvbox_i8xx_release(struct inode *inode, struct file *file) {
 }
 
 static int tvbox_i8xx_mmap(struct file *file,struct vm_area_struct *vma) {
-#if 0
-	size_t size = vma->vm_end - vma->vm_start;
-#endif
 	int r=1;
 
 	DBG_("mmap vm_start=0x%08X vm_pgoff=0x%08X",(unsigned int)vma->vm_start,(unsigned int)vma->vm_pgoff);
 
 	vma->vm_flags |= VM_IO;
 	vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
-
-#if 0
-	if (vma->vm_pgoff == (pgtable_base_phys >> PAGE_SHIFT)) {
-		if (size <= pgtable_size)
-			r = io_remap_pfn_range(vma, vma->vm_start, pgtable_base_phys >> PAGE_SHIFT, size, vma->vm_page_prot);
-	}
-	else if (vma->vm_pgoff == (hwst_base_phys >> PAGE_SHIFT)) {
-		if (size <= PAGE_SIZE)
-			r = io_remap_pfn_range(vma, vma->vm_start, hwst_base_phys >> PAGE_SHIFT, PAGE_SIZE, vma->vm_page_prot);
-	}
-#endif
 
 	if (r) {
 		DBG("mmap fail");
@@ -883,27 +770,8 @@ static int __init tvbox_i8xx_init(void) {
 		return -ENODEV;
 	}
 
-#if 0
-	DBG("Allocating block of physmem");
-	if (alloc_pgtable()) {
-		DBG("cannot alloc");
-		return -ENOMEM;
-	}
-
-	DBG("Allocating hw status page");
-	if (alloc_hwst_page()) {
-		DBG("cannot alloc");
-		free_pgtable();
-		return -ENOMEM;
-	}
-#endif
-
 	DBG("Mapping MMIO");
 	if (map_mmio()) {
-#if 0
-		free_pgtable();
-		free_hwst_page();
-#endif
 		DBG("cannot mmap");
 		return -ENOMEM;
 	}
@@ -911,10 +779,6 @@ static int __init tvbox_i8xx_init(void) {
 	DBG_("Registering char dev misc, minor %d",TVBOX_I8XX_MINOR);
 	if (misc_register(&tvbox_i8xx_dev)) {
 		unmap_mmio();
-#if 0
-		free_pgtable();
-		free_hwst_page();
-#endif
 		DBG("Misc register failed!");
 		return -ENODEV;
 	}
@@ -940,12 +804,6 @@ static void __exit tvbox_i8xx_cleanup(void) {
 
 	DBG("Unregistering device");
 	misc_deregister(&tvbox_i8xx_dev);
-#if 0
-	DBG("Freeing pagetable");
-	free_pgtable();
-	DBG("Freeing hwst");
-	free_hwst_page();
-#endif
 	DBG("Unmapping MMIO");
 	unmap_mmio();
 	DBG("Goodbye");
